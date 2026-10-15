@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#14532d">
+  <title>Jadwal Prodiakon</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="login" class="login" hidden>
+    <form id="loginForm" class="login-card">
+      <img src="icons/icon.svg" alt="" width="64" height="64">
+      <h1>Jadwal Prodiakon</h1>
+      <label>Email<input type="email" name="email" autocomplete="username" required></label>
+      <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+      <button class="btn primary" type="submit">Masuk</button>
+      <p class="err" id="loginErr"></p>
+    </form>
+  </div>
+
+  <div id="app" hidden>
+    <header class="top">
+      <div class="top-row">
+        <select id="monthSel" aria-label="Bulan"></select>
+        <span id="modeBadge" class="mode"></span>
+        <button class="icon-btn" id="menuBtn" aria-label="Menu">⋮</button>
+      </div>
+    </header>
+
+    <main id="main"></main>
+
+    <button class="fab" id="fab" aria-label="Tambah">＋</button>
+
+    <nav class="tabs">
+      <button data-tab="misa" class="on"><span>⛪</span>Misa</button>
+      <button data-tab="smk"><span>🕊️</span>SMK</button>
+      <button data-tab="petugas"><span>👤</span>Petugas</button>
+      <button data-tab="cek"><span>✔️</span>Cek<b id="cekCount"></b></button>
+    </nav>
+  </div>
+
+  <dialog id="sheet"><form method="dialog" id="sheetForm"></form></dialog>
+  <div id="toast" class="toast" hidden></div>
+  <div id="print" class="print-only"></div>
+  <datalist id="names"></datalist>
+  <input type="file" id="importFile" accept="application/json" hidden>
+
+  <script src="config.js"></script>
+  <script src="seed.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
