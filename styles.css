@@ -201,3 +201,14 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .urow .nm { font-weight: 600; }
 .urow .ad { font-size: .8rem; color: var(--muted); overflow-wrap: anywhere; }
 .sh-body > * { flex-shrink: 0; }
+/* Tab Saya */
+.me-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; margin: 2px 2px 4px; }
+.me-head h2 { margin: 0; }
+.asg.past { opacity: .5; }
+.asg.next { background: #f1f8f3; box-shadow: inset 4px 0 0 var(--brand-2); }
+.pick-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.pick-card h3 { margin: 0; }
+.pick-card .search { margin: 0; }
+.empty-state.small { padding: 14px; background: var(--card); border: 1px dashed var(--line); border-radius: var(--radius); }
+.u-link { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: .75rem; color: var(--muted); }
+.u-link select { font-size: .85rem; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; max-width: 100%; }

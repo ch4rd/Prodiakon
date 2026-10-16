@@ -90,6 +90,8 @@ create table if not exists public.app_users (
   created_at timestamptz not null default now()
 );
 alter table public.app_users enable row level security;
+-- Nama petugas di jadwal yang ditautkan admin ke akun ini (untuk tab "Saya")
+alter table public.app_users add column if not exists petugas text not null default '';
 
 -- Setiap akun baru (daftar dari app atau dibuat di dashboard) otomatis masuk app_users sebagai 'pending'
 create or replace function public.handle_new_user() returns trigger

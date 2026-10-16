@@ -141,8 +141,8 @@ class SupaStore {
   // Status persetujuan akun yang sedang login: pending | approved | rejected
   async me() {
     const { data: { user } } = await this.sb.auth.getUser();
-    const { data } = await this.sb.from('app_users').select('status, nama').eq('user_id', user.id).maybeSingle();
-    return { id: user.id, email: user.email, status: data?.status || 'pending', nama: data?.nama || '' };
+    const { data } = await this.sb.from('app_users').select('*').eq('user_id', user.id).maybeSingle();
+    return { id: user.id, email: user.email, status: data?.status || 'pending', nama: data?.nama || '', petugas: data?.petugas || '' };
   }
   async listUsers() {
     const { data, error } = await this.sb.from('app_users').select('*').order('created_at');
@@ -151,6 +151,10 @@ class SupaStore {
   }
   async setUserStatus(id, status) {
     const { error } = await this.sb.from('app_users').update({ status }).eq('user_id', id);
+    if (error) throw error;
+  }
+  async setUserPetugas(id, petugas) {
+    const { error } = await this.sb.from('app_users').update({ petugas }).eq('user_id', id);
     if (error) throw error;
   }
 }
@@ -163,7 +167,7 @@ const S = {
   misaFilter: 'ALL', smkQ: '', personQ: '', person: null,
   admin: true, // false = hanya bisa melihat (bukan admin)
   umat: [], smkView: lsGet('prodiakon.smkView') || 'grup', umatQ: '',
-  userId: null, pendingUsers: 0,
+  userId: null, pendingUsers: 0, me: null, pickName: false,
 };
 // Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
 let UM = new Map();
@@ -214,6 +218,8 @@ function render() {
   $('#monthSel').innerHTML = S.months.length
     ? S.months.map(m => `<option value="${h(m.id)}" ${m.id === S.monthId ? 'selected' : ''}>${h(monthName(m.id))}</option>`).join('')
     : '<option>Belum ada data</option>';
+  if (S.tab === 'cek' && !S.admin) S.tab = 'saya';
+  $('.tabs [data-tab="cek"]').hidden = !S.admin;
   $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
   $('#fab').hidden = !S.admin || !S.monthId || !['misa', 'smk'].includes(S.tab);
   $('#names').innerHTML = allNames().map(n => `<option value="${h(n)}">`).join('');
@@ -222,7 +228,8 @@ function render() {
 
   const main = $('#main');
   if (!S.monthId) { main.innerHTML = emptyState(); return; }
-  if (S.tab === 'misa') renderMisa(main);
+  if (S.tab === 'saya') renderSaya(main);
+  else if (S.tab === 'misa') renderMisa(main);
   else if (S.tab === 'smk') renderSmk(main);
   else if (S.tab === 'petugas') renderPetugas(main);
   else renderCek(main);
@@ -406,12 +413,16 @@ function renderPetugas(main) {
   draw();
 }
 
-function personDetail(p) {
-  const items = p.items.map(i => `<div class="asg">
-      <div class="d">${i.date ? h(fmtShort(i.date)) : ''}${i.time ? ' · pk ' + h(i.time) : ''}${i.week && i.type === 'smk' ? ' · minggu ' + h(i.week) : ''}</div>
+function asgItem(i, cls = '', tag = '') {
+  return `<div class="asg ${cls}">
+      <div class="d">${tag}${i.date ? h(fmtShort(i.date)) : ''}${i.time ? ' · pk ' + h(i.time) : ''}${i.week && i.type === 'smk' ? ' · minggu ' + h(i.week) : ''}</div>
       <div>${i.type === 'smk' ? '🕊️' : '⛪'} ${h(i.text)}${i.koor ? ' <b>(Koordinator)</b>' : ''}</div>
       ${i.members ? (i.members.length ? `<div class="visit">${i.members.map(visitBlock).join('')}</div>` : '<div class="count">Belum ada umat di grup ini</div>') : ''}
-    </div>`).join('');
+    </div>`;
+}
+
+function personDetail(p) {
+  const items = p.items.map(i => asgItem(i)).join('');
   return `<button class="back" data-act="back">‹ Semua petugas</button>
     <h2 style="margin:0 0 10px">${h(p.name)}</h2>
     <div class="list">${items}</div>
@@ -420,6 +431,50 @@ function personDetail(p) {
     </div>`;
 }
 
+/* ---- Saya: jadwal petugas yang login ---- */
+// Urutan: nama yang ditautkan admin → pilihan di perangkat ini → nama saat mendaftar
+function myName(ignorePick = false) {
+  if (S.pickName && !ignorePick) return '';
+  const all = allNames();
+  const pick = n => (n ? all.find(x => norm(x) === norm(n)) : null);
+  return pick(S.me?.petugas) || pick(lsGet('prodiakon.myName')) || pick(S.me?.nama) || '';
+}
+const nameLocked = () => !!(S.me?.petugas && allNames().some(x => norm(x) === norm(S.me.petugas)));
+
+function renderSaya(main) {
+  const name = myName();
+  if (!name) {
+    main.innerHTML = `<div class="pick-card">
+      <h3>Siapa nama Anda di jadwal?</h3>
+      <input id="myNameInp" class="search" list="names" placeholder="Ketik / pilih nama Anda…" autocomplete="off">
+      <button class="btn primary" data-act="set-myname">Tampilkan jadwal saya</button>
+      ${S.pickName && myName(true) ?'<button class="link-btn" data-act="cancel-myname">Batal</button>' : ''}
+      <p class="hint">Disimpan di perangkat ini. Admin juga bisa menautkan nama Anda ke akun (menu Pengguna).</p>
+    </div>`;
+    return;
+  }
+  const p = buildAssignments().find(x => x.key === norm(name));
+  const items = p?.items || [];
+  const today = iso(new Date());
+  const block = (list, emptyMsg) => {
+    if (!list.length) return `<div class="empty-state small">${emptyMsg}</div>`;
+    const next = list.find(i => i.date && i.date >= today);
+    return `<div class="list">${list.map(i => {
+      const past = i.date && i.date < today;
+      return asgItem(i, past ? 'past' : i === next ? 'next' : '', i === next ? '<span class="tag">Berikutnya</span> ' : '');
+    }).join('')}</div>`;
+  };
+  const smk = items.filter(i => i.type === 'smk'), misa = items.filter(i => i.type === 'misa');
+  main.innerHTML = `<div class="me-head">
+      <div><div class="hint">Jadwal saya · ${h(monthName(S.monthId))}</div><h2>${h(name)}</h2></div>
+      ${nameLocked() ? '' : '<button class="link-btn" data-act="change-myname">Bukan saya?</button>'}
+    </div>
+    <div class="sec-title">🕊️ SMK saya <span class="count">${smk.length} tugas</span></div>
+    ${block(smk, 'Tidak ada tugas antar SMK bulan ini.')}
+    <div class="sec-title">⛪ Misa saya <span class="count">${misa.length} tugas</span></div>
+    ${block(misa, 'Tidak ada tugas misa bulan ini.')}
+    ${items.length ? `<div class="btns" style="margin-top:12px"><button class="btn primary" data-act="share" data-k="${h(norm(name))}">Bagikan / salin jadwal saya</button></div>` : ''}`;
+}
 const mapsUrl = alamat => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(alamat)}`;
 
 // Umat yang dikunjungi petugas: alamat (+ peta), telp/WA, catatan
@@ -1032,6 +1087,13 @@ $('#main').addEventListener('click', e => {
   const { act, id, k } = el.dataset;
   if (!S.admin && ['edit-misa', 'edit-smk', 'edit-umat', 'load-seed', 'new-month'].includes(act)) return;
   if (act === 'smk-view') { S.smkView = k; lsSet('prodiakon.smkView', k); render(); return; }
+  if (act === 'change-myname') { S.pickName = true; render(); $('#myNameInp')?.focus(); return; }
+  if (act === 'cancel-myname') { S.pickName = false; render(); return; }
+  if (act === 'set-myname') {
+    const v = $('#myNameInp').value.trim(), n = allNames().find(x => norm(x) === norm(v));
+    if (!n) { toast(v ? `"${v}" tidak ada di jadwal bulan ini` : 'Pilih nama Anda dulu'); return; }
+    lsSet('prodiakon.myName', n); S.pickName = false; render(); return;
+  }
   if (act === 'edit-umat') { openUmat(UM.get(id)); return; }
   if (act === 'misa-filter') { S.misaFilter = k; render(); }
   else if (act === 'edit-misa') openMisa(S.misa.find(m => m.id === id));
@@ -1042,6 +1104,7 @@ $('#main').addEventListener('click', e => {
   else if (act === 'new-month') openNewMonth();
   else if (act === 'share') {
     const p = buildAssignments().find(x => x.key === k);
+    if (!p) return;
     const text = personText(p);
     if (navigator.share) navigator.share({ text }).catch(() => {});
     else navigator.clipboard.writeText(text).then(() => toast('Teks disalin'), () => toast('Gagal menyalin'));
@@ -1068,8 +1131,11 @@ async function openUsers() {
       u.status !== 'approved' && `<button type="button" class="btn small primary" data-sh="u-approved" data-id="${h(u.user_id)}">Setujui</button>`,
       u.status !== 'rejected' && `<button type="button" class="btn small" data-sh="u-rejected" data-id="${h(u.user_id)}">${u.status === 'approved' ? 'Cabut' : 'Tolak'}</button>`,
     ].filter(Boolean).join('');
+    const names = allNames(), cur = names.find(x => norm(x) === norm(u.petugas)) || u.petugas || '';
+    const link = u.status === 'rejected' ? '' : `<label class="u-link">Nama di jadwal
+        <select data-uid="${h(u.user_id)}">${opt('', '— belum ditautkan —', cur)}${(cur && !names.includes(cur) ? [cur] : []).concat(names).map(n => opt(n, n, cur)).join('')}</select></label>`;
     return `<div class="urow"><div class="mi"><span class="nm">${h(u.nama || '(tanpa nama)')}</span>
-      <div class="ad">${h(u.email)} · daftar ${h(fmtShort(u.created_at.slice(0, 10)))}</div></div>${btns}</div>`;
+      <div class="ad">${h(u.email)} · daftar ${h(fmtShort(u.created_at.slice(0, 10)))}</div>${link}</div>${btns}</div>`;
   };
   const sec = (st, title) => {
     const l = list.filter(u => u.status === st);
@@ -1088,6 +1154,11 @@ async function openUsers() {
       dlg.close(); await run(openUsers);
     },
   });
+  $$('.u-link select').forEach(sel => sel.addEventListener('change', () => run(async () => {
+    await store.setUserPetugas(sel.dataset.uid, sel.value);
+    if (sel.dataset.uid === S.userId) S.me.petugas = sel.value;
+    toast(sel.value ? `Ditautkan ke ${sel.value}` : 'Tautan dihapus');
+  })));
 }
 
 /* ================= Boot ================= */
@@ -1117,10 +1188,11 @@ function showPending(me) {
 async function showApp() {
   if (ONLINE) {
     const me = await store.me();
-    S.userId = me.id;
+    S.userId = me.id; S.me = me;
     S.admin = await store.isAdmin();
     if (!S.admin && me.status !== 'approved') return showPending(me);
     $('#modeBadge').textContent = S.admin ? 'Admin' : 'Lihat saja';
+    if (!S.admin && !lsGet('prodiakon.tab')) S.tab = 'saya'; // petugas: langsung jadwal sendiri
   }
   $('#login').hidden = true; $('#app').hidden = false;
   await run(loadMonths);
