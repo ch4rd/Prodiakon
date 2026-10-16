@@ -105,13 +105,16 @@ create table if not exists public.app_users (
 alter table public.app_users enable row level security;
 -- Nama petugas di jadwal yang ditautkan admin ke akun ini (untuk tab "Saya")
 alter table public.app_users add column if not exists petugas text not null default '';
+-- No. WA yang diisi saat mendaftar
+alter table public.app_users add column if not exists wa text not null default '';
 
 -- Setiap akun baru (daftar dari app atau dibuat di dashboard) otomatis masuk app_users sebagai 'pending'
 create or replace function public.handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.app_users (user_id, email, nama)
-  values (new.id, coalesce(new.email, ''), coalesce(new.raw_user_meta_data ->> 'nama', ''))
+  insert into public.app_users (user_id, email, nama, wa)
+  values (new.id, coalesce(new.email, ''), coalesce(new.raw_user_meta_data ->> 'nama', ''),
+          coalesce(new.raw_user_meta_data ->> 'wa', ''))
   on conflict (user_id) do nothing;
   return new;
 end $$;

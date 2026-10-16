@@ -1219,6 +1219,19 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---- Pengguna (persetujuan pendaftar) ---- */
+// Pendaftar disetujui → nama (dan No. WA) masuk Master petugas, akun ditautkan ke nama itu (tab Saya)
+async function approveToMaster(u) {
+  const nama = String(u?.nama || '').trim().replace(/\s+/g, ' ');
+  if (!nama) return '';
+  let p = inMaster(nama);
+  if (!p || !p.active || (!p.telp && u.wa)) {
+    p = p ? { ...p, active: true, telp: p.telp || u.wa || '' } : { id: uid(), nama, telp: u.wa || '', note: '', active: true };
+    await store.upsert('petugas', [p]);
+    setPetugas([...S.petugas.filter(x => x.id !== p.id), p]);
+  }
+  if (!u.petugas) await store.setUserPetugas(u.user_id, p.nama);
+  return p.nama;
+}
 async function openUsers() {
   const list = await store.listUsers();
   S.pendingUsers = list.filter(u => u.status === 'pending').length;
@@ -1231,7 +1244,8 @@ async function openUsers() {
     const link = u.status === 'rejected' ? '' : `<label class="u-link">Nama di jadwal
         <select data-uid="${h(u.user_id)}">${opt('', '— belum ditautkan —', cur)}${(cur && !names.includes(cur) ? [cur] : []).concat(names).map(n => opt(n, n, cur)).join('')}</select></label>`;
     return `<div class="urow"><div class="mi"><span class="nm">${h(u.nama || '(tanpa nama)')}</span>
-      <div class="ad">${h(u.email)} · daftar ${h(fmtShort(u.created_at.slice(0, 10)))}</div>${link}</div>${btns}</div>`;
+      <div class="ad">${h(u.email)} · daftar ${h(fmtShort(u.created_at.slice(0, 10)))}</div>
+      ${u.wa ? `<div class="phones">${phoneLinks(u.wa)}</div>` : ''}${link}</div>${btns}</div>`;
   };
   const sec = (st, title) => {
     const l = list.filter(u => u.status === st);
@@ -1246,7 +1260,12 @@ async function openUsers() {
       if (!st) return;
       if (st === 'rejected' && !confirm('Tolak / cabut akses pengguna ini?')) return;
       if ((await run(() => store.setUserStatus(b.dataset.id, st))) === false) return;
-      toast(st === 'approved' ? 'Disetujui' : 'Akses dicabut');
+      let msg = st === 'approved' ? 'Disetujui' : 'Akses dicabut';
+      if (st === 'approved') {
+        const nama = await run(() => approveToMaster(list.find(u => u.user_id === b.dataset.id)));
+        if (nama) msg += ` · ${nama} ada di Master petugas`;
+      }
+      toast(msg);
       dlg.close(); await run(openUsers);
     },
   });
@@ -1259,10 +1278,17 @@ async function openUsers() {
 
 /* ================= Boot ================= */
 let authMode = 'login';
+// No. WA → format 08xxxxxxxxxx ('' bila tidak valid). Terima 08…, 628…, +62 8…
+function normWa(v) {
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.startsWith('62')) d = '0' + d.slice(2);
+  return /^08\d{7,12}$/.test(d) ? d : '';
+}
 function setAuthMode(mode, hint = '') {
   authMode = mode;
   const su = mode === 'signup', f = $('#loginForm');
   $('#namaFld').hidden = !su; f.elements.nama.required = su;
+  $('#waFld').hidden = !su; f.elements.wa.required = su;
   f.elements.password.autocomplete = su ? 'new-password' : 'current-password';
   $('#authBtn').textContent = su ? 'Daftar' : 'Masuk';
   $('#authToggle').textContent = su ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar';
@@ -1305,9 +1331,11 @@ async function onAuthSubmit(e) {
   err.textContent = ''; btn.disabled = true;
   try {
     if (authMode === 'signup') {
+      const wa = normWa(fd.get('wa'));
+      if (!wa) { err.textContent = 'No. WA tidak valid. Contoh: 081234567890'; return; }
       const { data, error } = await store.sb.auth.signUp({
         email, password,
-        options: { data: { nama: fd.get('nama').trim() }, emailRedirectTo: location.origin + location.pathname },
+        options: { data: { nama: fd.get('nama').trim(), wa }, emailRedirectTo: location.origin + location.pathname },
       });
       if (error) {
         err.textContent = /not allowed|disabled/i.test(error.message) ? 'Pendaftaran sedang ditutup. Hubungi admin.' : 'Daftar gagal: ' + error.message;
