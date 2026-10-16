@@ -174,3 +174,18 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .chip.edit button { border: 0; background: transparent; color: var(--muted); font-size: .9rem; line-height: 1; padding: 2px 6px; border-radius: 6px; cursor: pointer; }
 .chip.edit button:hover { background: #dfe6e0; color: var(--ink); }
 #offChips { min-height: 34px; flex-shrink: 0; }
+/* Master umat */
+.umat { padding: 10px 12px; border-top: 1px solid var(--line); }
+.umat:first-child { border-top: 0; }
+.umat.tap { cursor: pointer; }
+.umat.tap:active { background: #f7faf8; }
+.umat .nm, .mem-row .nm { font-weight: 600; }
+.umat .ln, .mem-row .ln { font-size: .75rem; color: var(--brand-2); font-weight: 600; margin-left: 4px; }
+.umat .ad, .mem-row .ad { font-size: .85rem; color: var(--muted); }
+.ad.warn { color: var(--warn); }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; }
+.tag { font-size: .72rem; padding: 2px 7px; border-radius: 6px; background: #eef2ef; color: var(--brand); font-weight: 600; }
+.tag.warn { background: #fff7e0; color: var(--warn); }
+.mem-list { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+.mem-row { display: flex; align-items: flex-start; gap: 8px; padding: 8px 6px 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.mem-row .mi { flex: 1; min-width: 0; }

@@ -36,6 +36,19 @@ create table if not exists public.smk_groups (
 );
 create index if not exists smk_groups_month_idx on public.smk_groups(month_id);
 
+-- Master umat penerima SMK (berlaku lintas bulan).
+-- smk_groups.members menyimpan [{umat_id, nama}]; nama = cadangan bila umat dihapus dari master.
+create table if not exists public.umat (
+  id         uuid primary key default gen_random_uuid(),
+  nama       text not null,
+  lingkungan text not null default '',
+  alamat     text not null default '',
+  telp       text not null default '',
+  note       text not null default '',
+  active     boolean not null default true,      -- false = tidak dilayani lagi (pindah, sembuh, meninggal)
+  updated_at timestamptz not null default now()
+);
+
 -- updated_at otomatis
 create or replace function public.touch_updated_at() returns trigger
 language plpgsql as $$ begin new.updated_at = now(); return new; end $$;
@@ -46,6 +59,8 @@ drop trigger if exists misa_touch on public.misa;
 create trigger misa_touch before update on public.misa for each row execute function public.touch_updated_at();
 drop trigger if exists smk_groups_touch on public.smk_groups;
 create trigger smk_groups_touch before update on public.smk_groups for each row execute function public.touch_updated_at();
+drop trigger if exists umat_touch on public.umat;
+create trigger umat_touch before update on public.umat for each row execute function public.touch_updated_at();
 
 -- Keamanan:
 --  * Semua user yang login boleh MELIHAT data.
@@ -69,11 +84,12 @@ grant execute on function public.is_admin() to authenticated;
 alter table public.months     enable row level security;
 alter table public.misa       enable row level security;
 alter table public.smk_groups enable row level security;
+alter table public.umat       enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['months', 'misa', 'smk_groups'] loop
+  foreach t in array array['months', 'misa', 'smk_groups', 'umat'] loop
     execute format('drop policy if exists %I on public.%I', t || '_auth', t);
     execute format('drop policy if exists %I on public.%I', t || '_read', t);
     execute format('drop policy if exists %I on public.%I', t || '_write', t);

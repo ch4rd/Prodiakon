@@ -88,7 +88,7 @@ function download(name, text, type) {
 class LocalStore {
   constructor() { this.key = 'prodiakon.data.v1'; }
   read() {
-    const empty = { months: [], misa: [], smk_groups: [] };
+    const empty = { months: [], misa: [], smk_groups: [], umat: [] };
     try { return { ...empty, ...JSON.parse(lsGet(this.key) || '{}') }; } catch { return empty; }
   }
   write(d) { localStorage.setItem(this.key, JSON.stringify(d)); }
@@ -147,7 +147,19 @@ const S = {
   tab: lsGet('prodiakon.tab') || 'misa',
   misaFilter: 'ALL', smkQ: '', personQ: '', person: null,
   admin: true, // false = hanya bisa melihat (bukan admin)
+  umat: [], smkView: lsGet('prodiakon.smkView') || 'grup', umatQ: '',
 };
+// Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
+let UM = new Map();
+function setUmat(list) {
+  S.umat = list.sort((a, b) => a.nama.localeCompare(b.nama));
+  UM = new Map(S.umat.map(u => [u.id, u]));
+}
+const mem = g => g.members.map(m => {
+  const u = m.umat_id && UM.get(m.umat_id);
+  return u ? { ...u, umat_id: u.id } : m;
+});
+const umatLabel = u => (u.lingkungan ? `${u.nama} · ${u.lingkungan}` : u.nama);
 const curMonth = () => S.months.find(m => m.id === S.monthId);
 const weeks = () => (curMonth()?.weeks || []);
 const misaOfSlot = slot => S.misa.filter(m => m.slot === slot).sort(cmpMisa);
@@ -166,11 +178,17 @@ async function loadMonths() {
 async function loadMonth() {
   if (S.monthId) {
     lsSet('prodiakon.month', S.monthId);
-    const [m, g] = await Promise.all([store.list('misa', S.monthId), store.list('smk_groups', S.monthId)]);
+    const [m, g, u] = await Promise.all([store.list('misa', S.monthId), store.list('smk_groups', S.monthId), store.list('umat')]);
     S.misa = m;
     S.smk = g.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
+    setUmat(u);
+    if (S.admin && S.smk.some(x => x.members.some(y => !y.umat_id))) {
+      const n = await linkLegacy(S.smk);
+      if (n) toast(`${n} umat dipindah ke Master umat`);
+    }
   } else {
     S.misa = []; S.smk = [];
+    setUmat(await store.list('umat'));
   }
   render();
 }
@@ -256,7 +274,13 @@ function misaCard(m, highlight) {
 
 /* ---- SMK ---- */
 function renderSmk(main) {
-  main.innerHTML = `<input class="search" id="smkQ" type="search" placeholder="Cari umat, petugas, lingkungan, alamat…" value="${h(S.smkQ)}">
+  const v = S.smkView === 'umat' ? 'umat' : 'grup';
+  const bar = `<div class="bar">
+    <button class="pill ${v === 'grup' ? 'on' : ''}" data-act="smk-view" data-k="grup">Grup antaran</button>
+    <button class="pill ${v === 'umat' ? 'on' : ''}" data-act="smk-view" data-k="umat">Master umat (${S.umat.filter(u => u.active).length})</button>
+  </div>`;
+  if (v === 'umat') return renderUmat(main, bar);
+  main.innerHTML = bar + `<input class="search" id="smkQ" type="search" placeholder="Cari umat, petugas, lingkungan, alamat…" value="${h(S.smkQ)}">
     <div id="smkList"></div>
     ${curMonth()?.notes ? `<div class="notes-box"><b>Catatan</b>\n${h(curMonth().notes)}</div>` : ''}`;
   $('#smkQ').addEventListener('input', e => { S.smkQ = e.target.value; renderSmkList(); });
@@ -265,13 +289,13 @@ function renderSmk(main) {
 
 function renderSmkList() {
   const q = norm(S.smkQ);
-  const match = g => !q || norm([g.no, ...g.officers, ...g.members.flatMap(m => [m.nama, m.lingkungan, m.alamat, m.telp])].join(' ')).includes(q);
+  const match = g => !q || norm([g.no, ...g.officers, ...mem(g).flatMap(m => [m.nama, m.lingkungan, m.alamat, m.telp])].join(' ')).includes(q);
   let html = '';
   for (const s of SMK_SLOTS) {
     const groups = S.smk.filter(g => g.slot === s.key && match(g));
     if (!groups.length) continue;
-    const umat = groups.reduce((a, g) => a + g.members.length, 0);
-    const units = groups.reduce((a, g) => a + g.members.reduce((x, m) => x + smkUnits(m.nama), 0), 0);
+    const umat = groups.reduce((a, g) => a + mem(g).length, 0);
+    const units = groups.reduce((a, g) => a + mem(g).reduce((x, m) => x + smkUnits(m.nama), 0), 0);
     html += `<div class="sec-title">${h(s.label)} <span class="count">${groups.length} grup · ${umat} umat · ${units} SMK</span></div>`;
     html += groups.map(smkCard).join('');
   }
@@ -286,7 +310,7 @@ function smkCard(g) {
     return `<div class="wk ${bad || !name ? 'bad' : ''}" title="${bad ? 'Tidak ada di jadwal misa minggu ini' : ''}">
       <small>${h(w)}</small><b>${h(name || '—')}</b></div>`;
   }).join('');
-  const mem = g.members.map(m => `<div class="member">
+  const memHtml = mem(g).map(m => `<div class="member">
       <div><span class="nm">${h(m.nama)}</span>${m.lingkungan ? `<span class="ln">${h(m.lingkungan)}</span>` : ''}</div>
       ${m.alamat ? `<div class="ad">📍 ${h(m.alamat)}</div>` : ''}
       ${m.telp ? `<div class="phones">${phoneLinks(m.telp)}</div>` : ''}
@@ -294,10 +318,10 @@ function smkCard(g) {
   return `<article class="card">
     <div class="c-head">
       <span class="badge">${h(g.no)}</span>
-      <span class="sub">${g.members.length} umat</span>
+      <span class="sub">${mem(g).length} umat</span>
       ${S.admin ? `<button class="btn small" style="margin-left:auto" data-act="edit-smk" data-id="${h(g.id)}">Ubah</button>` : ''}
     </div>
-    <div class="c-body"><div class="weeks">${wk}</div>${mem || '<span class="count">Belum ada umat</span>'}</div>
+    <div class="c-body"><div class="weeks">${wk}</div>${memHtml || '<span class="count">Belum ada umat</span>'}</div>
   </article>`;
 }
 
@@ -334,7 +358,7 @@ function buildAssignments() {
       add(n, {
         type: 'smk', date: lm?.date || we[i]?.sat || '', time: lm?.time || '', week: weeks()[i] || '',
         text: `Antaran SMK grup ${g.no} (${smkSlotLabel(g.slot)})`,
-        members: g.members.map(m => m.nama),
+        members: mem(g).map(m => m.nama),
       });
     });
   }
@@ -404,6 +428,14 @@ function buildIssues() {
         out.push(['❗', `${name} bertugas antar SMK grup ${g.no} (${w}) tapi tidak ada di jadwal misa ${g.slot} ${fmtShort(lm.date)}.`]);
       }
     });
+  }
+  const asg = umatAssignments();
+  for (const u of S.umat) {
+    const gs = asg.get(u.id) || [];
+    const nm = u.nama + (u.lingkungan ? ` (${u.lingkungan})` : '');
+    if (gs.length > 1) out.push(['❗', `Umat ${nm} tercantum di ${gs.length} grup SMK: ${gs.map(g => g.no).join(', ')}.`]);
+    if (!u.active && gs.length) out.push(['⚠️', `Umat ${nm} sudah tidak aktif tapi masih ada di grup SMK ${gs.map(g => g.no).join(', ')}.`]);
+    if (u.active && !gs.length && S.smk.length) out.push(['ℹ️', `Umat ${nm} aktif tapi belum masuk grup SMK bulan ini.`]);
   }
   const perDay = new Map();
   for (const m of S.misa) {
@@ -561,24 +593,127 @@ function openMisa(m) {
   renderOfficers();
 }
 
-/* ---- Edit grup SMK ---- */
-const memberBlock = (m = {}) => `<div class="mem-edit">
-  <button type="button" class="icon-btn rm" data-sh="rm-mem" aria-label="Hapus umat">✕</button>
-  <label class="fld">Nama<input data-f="nama" value="${h(m.nama)}" required></label>
-  <div class="grid2">
-    <label class="fld">Lingkungan<input data-f="lingkungan" value="${h(m.lingkungan)}"></label>
-    <label class="fld">Telp / HP<input data-f="telp" value="${h(m.telp)}" inputmode="tel"></label>
-  </div>
-  <label class="fld">Alamat<input data-f="alamat" value="${h(m.alamat)}"></label>
-</div>`;
+/* ---- Master umat ---- */
+// Grup yang memuat tiap umat di bulan aktif: Map(umat_id → [grup])
+function umatAssignments() {
+  const map = new Map();
+  for (const g of S.smk) {
+    for (const m of g.members) {
+      if (!m.umat_id) continue;
+      if (!map.has(m.umat_id)) map.set(m.umat_id, []);
+      map.get(m.umat_id).push(g);
+    }
+  }
+  return map;
+}
 
+function renderUmat(main, bar) {
+  main.innerHTML = bar + `<input class="search" id="umatQ" type="search" placeholder="Cari nama, lingkungan, alamat, telp…" value="${h(S.umatQ)}">
+    <div id="umatList"></div>`;
+  $('#umatQ').addEventListener('input', e => { S.umatQ = e.target.value; drawUmat(); });
+  drawUmat();
+}
+
+function drawUmat() {
+  const q = norm(S.umatQ), asg = umatAssignments();
+  const match = u => !q || norm([u.nama, u.lingkungan, u.alamat, u.telp, u.note].join(' ')).includes(q);
+  const sec = (title, list) => (list.length
+    ? `<div class="sec-title">${title} <span class="count">${list.length} umat</span></div>
+       <div class="list">${list.map(u => umatRow(u, asg.get(u.id))).join('')}</div>`
+    : '');
+  const html = sec('Aktif', S.umat.filter(u => u.active && match(u))) + sec('Tidak aktif', S.umat.filter(u => !u.active && match(u)));
+  $('#umatList').innerHTML = html || `<div class="empty-state">${S.umat.length ? 'Tidak ditemukan.'
+    : `Belum ada umat.${S.admin ? ' Tekan ＋ untuk menambah.' : ''}`}</div>`;
+}
+
+function umatRow(u, groups = []) {
+  const where = groups.length
+    ? groups.map(g => `<span class="tag">Grup ${h(g.no)} · ${h(smkSlotLabel(g.slot))}</span>`).join('')
+    : (u.active && S.monthId ? '<span class="tag warn">Belum masuk grup bulan ini</span>' : '');
+  return `<div class="umat${S.admin ? ' tap' : ''}" ${S.admin ? `data-act="edit-umat" data-id="${h(u.id)}"` : ''}>
+    <div><span class="nm">${h(u.nama)}</span>${u.lingkungan ? `<span class="ln">${h(u.lingkungan)}</span>` : ''}</div>
+    ${u.alamat ? `<div class="ad">📍 ${h(u.alamat)}</div>` : ''}
+    ${u.telp ? `<div class="phones">${phoneLinks(u.telp)}</div>` : ''}
+    ${u.note ? `<div class="ad">📝 ${h(u.note)}</div>` : ''}
+    ${where ? `<div class="tags">${where}</div>` : ''}
+  </div>`;
+}
+
+function openUmat(u) {
+  const isNew = !u;
+  u = u ? { ...u } : { id: uid(), nama: '', lingkungan: '', alamat: '', telp: '', note: '', active: true };
+  const body = `
+    <label class="fld">Nama<input name="nama" required value="${h(u.nama)}" placeholder="mis. Ibu Maria (2 SMK)"></label>
+    <div class="grid2">
+      <label class="fld">Lingkungan<input name="lingkungan" value="${h(u.lingkungan)}"></label>
+      <label class="fld">Telp / HP<input name="telp" value="${h(u.telp)}" inputmode="tel" placeholder="0812… / 0813…"></label>
+    </div>
+    <label class="fld">Alamat<input name="alamat" value="${h(u.alamat)}"></label>
+    <label class="fld">Catatan<input name="note" value="${h(u.note)}" placeholder="mis. lantai 2, hanya pagi"></label>
+    <label><input type="checkbox" name="active" ${u.active ? 'checked' : ''}> Masih dilayani (aktif)</label>
+    <p class="hint">Tulis "(2 SMK)" di nama bila satu rumah menerima lebih dari satu. Umat yang pindah/sembuh/meninggal cukup ditandai tidak aktif.</p>`;
+  openSheet(isNew ? 'Umat baru' : 'Ubah umat', body, {
+    save: async fd => {
+      const row = {
+        ...u, nama: fd.get('nama').trim(), lingkungan: fd.get('lingkungan').trim(), alamat: fd.get('alamat').trim(),
+        telp: fd.get('telp').trim(), note: fd.get('note').trim(), active: !!fd.get('active'),
+      };
+      if (!row.nama) { toast('Nama wajib diisi'); return false; }
+      const dup = S.umat.find(x => x.id !== row.id && norm(x.nama) === norm(row.nama) && norm(x.alamat) === norm(row.alamat));
+      if (dup && !confirm(`"${row.nama}" dengan alamat yang sama sudah ada di master. Tetap simpan?`)) return false;
+      await store.upsert('umat', [row]);
+      setUmat([...S.umat.filter(x => x.id !== row.id), row]);
+      render(); toast('Tersimpan');
+    },
+    del: isNew ? null : async () => {
+      const used = S.smk.filter(g => g.members.some(m => m.umat_id === u.id));
+      if (used.length) {
+        toast(`Masih ada di grup ${used.map(g => g.no).join(', ')} bulan ini. Keluarkan dulu dari grup, atau tandai tidak aktif.`);
+        return false;
+      }
+      await store.remove('umat', u.id);
+      setUmat(S.umat.filter(x => x.id !== u.id)); render(); toast('Dihapus');
+    },
+  });
+}
+
+// Anggota grup lama (nama/alamat diketik langsung) → dipindah ke master umat, grup menyimpan {umat_id, nama}.
+async function linkLegacy(groups, persistGroups = true) {
+  const added = [], changed = [];
+  const find = m => [...S.umat, ...added].find(u => norm(u.nama) === norm(m.nama)
+    && (!m.alamat || !u.alamat || norm(u.alamat) === norm(m.alamat)));
+  for (const g of groups) {
+    const before = (g.members || []).length;
+    let dirty = false;
+    g.members = (g.members || []).filter(m => m.umat_id || String(m.nama || '').trim()).map(m => {
+      if (m.umat_id) return m;
+      dirty = true;
+      let u = find(m);
+      if (!u) {
+        u = {
+          id: uid(), nama: m.nama.trim(), lingkungan: (m.lingkungan || '').trim(), alamat: (m.alamat || '').trim(),
+          telp: (m.telp || '').trim(), note: '', active: true,
+        };
+        added.push(u);
+      }
+      return { umat_id: u.id, nama: u.nama };
+    });
+    if (dirty || g.members.length !== before) changed.push(g);
+  }
+  if (added.length) { await store.upsert('umat', added); setUmat([...S.umat, ...added]); }
+  if (persistGroups && changed.length) await store.upsert('smk_groups', changed);
+  return added.length;
+}
+
+/* ---- Edit grup SMK ---- */
 function openSmk(g) {
   const isNew = !g;
   const maxNo = Math.max(0, ...S.smk.map(x => Number(x.no) || 0));
   g = g ? structuredClone(g) : {
     id: uid(), month_id: S.monthId, slot: 'M1', no: String(maxNo + 1),
-    sort: Math.max(-1, ...S.smk.map(x => x.sort ?? 0)) + 1, officers: [], members: [{}],
+    sort: Math.max(-1, ...S.smk.map(x => x.sort ?? 0)) + 1, officers: [], members: [],
   };
+  const members = g.members.filter(m => m.umat_id || String(m.nama || '').trim());
   const body = `
     <div class="grid2">
       <label class="fld">No<input name="no" value="${h(g.no)}"></label>
@@ -586,16 +721,20 @@ function openSmk(g) {
     </div>
     <div class="fld">Petugas per minggu</div>
     <div class="grid2">${weeks().map((w, i) => `<label class="fld">${h(w)}<input name="off${i}" list="names" value="${h(g.officers[i] || '')}"></label>`).join('')}</div>
-    <div class="fld">Umat yang dilayani</div>
-    <div id="memWrap" style="display:flex;flex-direction:column;gap:8px">${g.members.map(memberBlock).join('')}</div>
-    <button type="button" class="btn small" data-sh="add-mem">＋ Tambah umat</button>`;
+    <div class="fld">Umat yang dilayani <span id="memCount"></span></div>
+    <div id="memList" class="mem-list"></div>
+    <div class="grid2" style="grid-template-columns:1fr auto;align-items:end">
+      <label class="fld">Tambah umat dari master<input id="addUmat" list="umatOpts" placeholder="Pilih / ketik nama umat…" autocomplete="off"></label>
+      <button type="button" class="btn" data-sh="add-umat">Tambah</button>
+    </div>
+    <datalist id="umatOpts"></datalist>
+    <p class="hint">Alamat & telp diubah di SMK → Master umat.</p>`;
   openSheet(isNew ? 'Tambah grup SMK' : `Ubah grup SMK ${g.no}`, body, {
-    save: async (fd, f) => {
-      const members = $$('.mem-edit', f).map(el => Object.fromEntries($$('[data-f]', el).map(i => [i.dataset.f, i.value.trim()])))
-        .filter(m => m.nama);
+    save: async fd => {
       const row = {
         ...g, no: fd.get('no').trim(), slot: fd.get('slot'),
-        officers: weeks().map((_, i) => (fd.get('off' + i) || '').trim()), members,
+        officers: weeks().map((_, i) => (fd.get('off' + i) || '').trim()),
+        members: members.map(m => (m.umat_id ? { umat_id: m.umat_id, nama: UM.get(m.umat_id)?.nama || m.nama } : m)),
       };
       await store.upsert('smk_groups', [row]);
       const i = S.smk.findIndex(x => x.id === row.id);
@@ -606,13 +745,52 @@ function openSmk(g) {
       await store.remove('smk_groups', g.id);
       S.smk = S.smk.filter(x => x.id !== g.id); render(); toast('Dihapus');
     },
-    onClick: (b, f) => {
-      if (b.dataset.sh === 'add-mem') {
-        $('#memWrap', f).insertAdjacentHTML('beforeend', memberBlock());
-        $('#memWrap', f).lastElementChild.querySelector('input').focus();
-      } else if (b.dataset.sh === 'rm-mem') b.closest('.mem-edit').remove();
+    onClick: b => {
+      if (b.dataset.sh === 'add-umat') addUmat($('#addUmat').value);
+      else if (b.dataset.sh === 'rm-mem') { members.splice(Number(b.dataset.i), 1); drawMem(); }
     },
   });
+  const otherGroups = id => S.smk.filter(x => x.id !== g.id && x.members.some(m => m.umat_id === id)).map(x => x.no);
+  const drawMem = () => {
+    $('#memList').innerHTML = members.length ? members.map((m, i) => {
+      const u = m.umat_id && UM.get(m.umat_id), d = u || m;
+      const other = m.umat_id ? otherGroups(m.umat_id) : [];
+      const warn = [
+        !u && (m.umat_id ? 'Sudah dihapus dari master' : 'Belum terhubung ke master'),
+        u && !u.active && 'Tidak aktif di master',
+        other.length && `Juga di grup ${other.join(', ')}`,
+      ].filter(Boolean);
+      return `<div class="mem-row"><div class="mi">
+          <span class="nm">${h(d.nama)}</span>${d.lingkungan ? `<span class="ln">${h(d.lingkungan)}</span>` : ''}
+          ${d.alamat ? `<div class="ad">${h(d.alamat)}</div>` : ''}
+          ${warn.map(w => `<div class="ad warn">⚠️ ${h(w)}</div>`).join('')}
+        </div><button type="button" class="icon-btn" data-sh="rm-mem" data-i="${i}" aria-label="Keluarkan dari grup">✕</button></div>`;
+    }).join('') : '<span class="hint">Belum ada umat.</span>';
+    $('#memCount').textContent = members.length ? `(${members.length})` : '';
+    const inGroup = new Set(members.map(m => m.umat_id));
+    $('#umatOpts').innerHTML = S.umat.filter(u => u.active && !inGroup.has(u.id))
+      .map(u => `<option value="${h(umatLabel(u))}">`).join('');
+  };
+  const addUmat = async text => {
+    const t = String(text).trim();
+    if (!t) return;
+    const byName = S.umat.filter(x => norm(x.nama) === norm(t));
+    let u = S.umat.find(x => norm(umatLabel(x)) === norm(t)) || (byName.length === 1 ? byName[0] : null);
+    if (!u) {
+      if (byName.length > 1) { toast(`Ada ${byName.length} umat bernama "${t}", pilih dari daftar (lihat lingkungannya).`); return; }
+      if (!confirm(`"${t}" belum ada di Master umat. Tambahkan sebagai umat baru?\nAlamat & telp bisa dilengkapi nanti di Master umat.`)) return;
+      u = { id: uid(), nama: t, lingkungan: '', alamat: '', telp: '', note: '', active: true };
+      const nu = u;
+      if ((await run(async () => { await store.upsert('umat', [nu]); setUmat([...S.umat, nu]); })) === false) return;
+    }
+    if (!members.some(m => m.umat_id === u.id)) members.push({ umat_id: u.id, nama: u.nama });
+    $('#addUmat').value = '';
+    drawMem();
+  };
+  const inp = $('#addUmat');
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addUmat(inp.value); } });
+  inp.addEventListener('input', e => { if (e.inputType === 'insertReplacementText' || !e.inputType) addUmat(inp.value); });
+  drawMem();
 }
 
 /* ---- Bulan ---- */
@@ -651,7 +829,7 @@ function openNewMonth() {
       await store.upsert('months', [month]);
       await store.upsert('misa', misa);
       await store.upsert('smk_groups', groups);
-      S.monthId = ym;
+      S.monthId = ym; lsSet('prodiakon.month', ym);
       await loadMonths(); toast(`${monthName(ym)} dibuat`);
     },
   });
@@ -713,7 +891,11 @@ async function importData(data, msg) {
   const withId = rows => (rows || []).map(r => ({ ...r, id: r.id || uid() }));
   await store.upsert('months', data.months || []);
   await store.upsert('misa', withId(data.misa));
-  await store.upsert('smk_groups', withId(data.smk_groups));
+  await store.upsert('umat', withId(data.umat));
+  setUmat(await store.list('umat'));
+  const groups = withId(data.smk_groups);
+  await linkLegacy(groups, false); // backup/seed lama: anggota → master umat
+  await store.upsert('smk_groups', groups);
   await loadMonths(); toast(msg);
 }
 async function loadSeed() {
@@ -722,8 +904,8 @@ async function loadSeed() {
   await importData(seed, 'Data Oktober 2026 dimuat');
 }
 async function backup() {
-  const [months, misa, smk_groups] = await Promise.all([store.list('months'), store.list('misa'), store.list('smk_groups')]);
-  download(`prodiakon-backup-${iso(new Date())}.json`, JSON.stringify({ app: 'prodiakon', version: 1, months, misa, smk_groups }, null, 1), 'application/json');
+  const [months, misa, smk_groups, umat] = await Promise.all(['months', 'misa', 'smk_groups', 'umat'].map(k => store.list(k)));
+  download(`prodiakon-backup-${iso(new Date())}.json`, JSON.stringify({ app: 'prodiakon', version: 2, months, misa, smk_groups, umat }, null, 1), 'application/json');
 }
 $('#importFile').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = '';
@@ -731,7 +913,7 @@ $('#importFile').addEventListener('change', async e => {
   await run(async () => {
     const data = JSON.parse(await file.text());
     if (!Array.isArray(data.months)) throw new Error('File bukan backup aplikasi ini');
-    if (!confirm(`Import ${data.months.length} bulan, ${data.misa?.length || 0} misa, ${data.smk_groups?.length || 0} grup SMK? Data dengan ID sama akan ditimpa.`)) return;
+    if (!confirm(`Import ${data.months.length} bulan, ${data.misa?.length || 0} misa, ${data.smk_groups?.length || 0} grup SMK, ${data.umat?.length || 0} umat? Data dengan ID sama akan ditimpa.`)) return;
     await importData(data, 'Import selesai');
   });
 });
@@ -742,7 +924,7 @@ function exportCsv() {
   const rows = [['No', 'Jam layanan', ...W, 'Nama umat', 'Lingkungan', 'Alamat', 'Telp']];
   for (const s of SMK_SLOTS) {
     for (const g of S.smk.filter(x => x.slot === s.key)) {
-      (g.members.length ? g.members : [{}]).forEach((m, i) => rows.push([
+      (mem(g).length ? mem(g) : [{}]).forEach((m, i) => rows.push([
         i ? '' : g.no, i ? '' : s.label, ...W.map((_, j) => (i ? '' : g.officers[j] || '')),
         m.nama, m.lingkungan, m.alamat, m.telp,
       ]));
@@ -762,7 +944,7 @@ function printView() {
       if (!gs.length) continue;
       rows += `<tr class="sec"><td colspan="${6 + W.length}">${h(s.label.toUpperCase())}</td></tr>`;
       for (const g of gs) {
-        const ms = g.members.length ? g.members : [{}];
+        const ms = mem(g).length ? mem(g) : [{}];
         ms.forEach((m, i) => {
           rows += `<tr>${i ? '' : `<td rowspan="${ms.length}">${h(g.no)}</td>${W.map((_, j) => `<td rowspan="${ms.length}">${h(g.officers[j] || '')}</td>`).join('')}`}
             <td>${h(m.nama)}</td><td>${h(m.lingkungan)}</td><td>${h(m.alamat)}</td><td>${h(m.telp)}</td></tr>`;
@@ -801,10 +983,13 @@ function printView() {
 
 /* ================= Event global ================= */
 $('#main').addEventListener('click', e => {
+  if (e.target.closest('a')) return; // link telp/WA di dalam kartu
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const { act, id, k } = el.dataset;
-  if (!S.admin && ['edit-misa', 'edit-smk', 'load-seed', 'new-month'].includes(act)) return;
+  if (!S.admin && ['edit-misa', 'edit-smk', 'edit-umat', 'load-seed', 'new-month'].includes(act)) return;
+  if (act === 'smk-view') { S.smkView = k; lsSet('prodiakon.smkView', k); render(); return; }
+  if (act === 'edit-umat') { openUmat(UM.get(id)); return; }
   if (act === 'misa-filter') { S.misaFilter = k; render(); }
   else if (act === 'edit-misa') openMisa(S.misa.find(m => m.id === id));
   else if (act === 'edit-smk') openSmk(S.smk.find(g => g.id === id));
@@ -825,7 +1010,7 @@ $$('.tabs button').forEach(b => b.addEventListener('click', () => {
 }));
 $('#monthSel').addEventListener('change', e => { S.monthId = e.target.value; S.person = null; run(loadMonth); });
 $('#menuBtn').addEventListener('click', openMenu);
-$('#fab').addEventListener('click', () => S.admin && (S.tab === 'smk' ? openSmk() : openMisa()));
+$('#fab').addEventListener('click', () => S.admin && (S.tab !== 'smk' ? openMisa() : S.smkView === 'umat' ? openUmat() : openSmk()));
 document.addEventListener('visibilitychange', () => {
   // ambil perubahan dari pengguna lain saat app dibuka kembali
   if (!document.hidden && ONLINE && !dlg.open && !$('#app').hidden) run(loadMonth);

@@ -1,5 +1,5 @@
 // Service worker: app tetap bisa dibuka saat sinyal jelek. Naikkan VERSION setiap deploy perubahan.
-const VERSION = 'prodiakon-v5';
+const VERSION = 'prodiakon-v6';
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'config.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
