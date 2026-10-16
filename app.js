@@ -295,7 +295,7 @@ function render() {
   $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
   $('#fab').hidden = !S.admin || !S.monthId || !(['misa', 'smk'].includes(S.tab) || (S.tab === 'petugas' && S.petugasView === 'master'));
   $('#names').innerHTML = masterNames().map(n => `<option value="${h(n)}">`).join('');
-  const n = buildIssues().length;
+  const n = S.admin ? activeIssues().length : 0;
   $('#cekCount').textContent = n ? String(n) : '';
 
   const main = $('#main');
@@ -673,13 +673,14 @@ function buildIssues() {
   for (const g of S.smk) {
     W.forEach((w, i) => {
       const name = (g.officers[i] || '').trim();
-      if (!name) { out.push(['⚠️', `SMK grup ${g.no} (${smkSlotLabel(g.slot)}) minggu ${w} belum ada petugas.`, `smk:${g.id}`]); return; }
+      const sun = weekendsOf(S.monthId)[i]?.sun || '';
+      const day = sun && slotByKey(g.slot) ? slotDate(slotByKey(g.slot), sun) : sun;
+      if (!name) { out.push(['⚠️', `SMK grup ${g.no} (${smkSlotLabel(g.slot)}) minggu ${w} belum ada petugas.`, `smk:${g.id}`, day]); return; }
       if (!REGULAR.includes(g.slot)) return;
       const lm = linkedMisa(g.slot, i);
-      const sun = weekendsOf(S.monthId)[i]?.sun;
-      if (!lm) out.push(['⚠️', `Jadwal misa ${g.slot} minggu ke-${i + 1} (${w}) belum dibuat, padahal ada petugas SMK grup ${g.no}.`, `misa-new:${g.slot}|${sun && slotByKey(g.slot) ? slotDate(slotByKey(g.slot), sun) : ''}`]);
+      if (!lm) out.push(['⚠️', `Jadwal misa ${g.slot} minggu ke-${i + 1} (${w}) belum dibuat, padahal ada petugas SMK grup ${g.no}.`, `misa-new:${g.slot}|${day}`, day]);
       else if (!lm.officers.some(n => norm(n) === norm(name))) {
-        out.push(['❗', `${name} bertugas antar SMK grup ${g.no} (${w}) tapi tidak ada di jadwal misa ${g.slot} ${fmtShort(lm.date)}.`, `misa:${lm.id}`]);
+        out.push(['❗', `${name} bertugas antar SMK grup ${g.no} (${w}) tapi tidak ada di jadwal misa ${g.slot} ${fmtShort(lm.date)}.`, `misa:${lm.id}`, lm.date]);
       }
     });
   }
@@ -699,13 +700,13 @@ function buildIssues() {
   const perDay = new Map();
   for (const m of S.misa) {
     const label = `${m.slot === 'LAIN' ? m.title : m.slot} ${fmtShort(m.date)}`;
-    if ((m.need || 0) > m.officers.length) out.push(['⚠️', `${label}: kurang ${m.need - m.officers.length} petugas.`, `misa:${m.id}`]);
-    if (REGULAR.includes(m.slot) && !m.officers.length) out.push(['⚠️', `${label}: belum ada petugas.`, `misa:${m.id}`]);
-    if (m.officers.length && !m.coordinator) out.push(['ℹ️', `${label}: koordinator belum ditentukan.`, `misa:${m.id}`]);
+    if ((m.need || 0) > m.officers.length) out.push(['⚠️', `${label}: kurang ${m.need - m.officers.length} petugas.`, `misa:${m.id}`, m.date]);
+    if (REGULAR.includes(m.slot) && !m.officers.length) out.push(['⚠️', `${label}: belum ada petugas.`, `misa:${m.id}`, m.date]);
+    if (m.officers.length && !m.coordinator) out.push(['ℹ️', `${label}: koordinator belum ditentukan.`, `misa:${m.id}`, m.date]);
     const seen = new Set();
     for (const n of m.officers) {
       const k = norm(n);
-      if (seen.has(k)) out.push(['❗', `${label}: nama "${n}" tercantum dua kali.`, `misa:${m.id}`]);
+      if (seen.has(k)) out.push(['❗', `${label}: nama "${n}" tercantum dua kali.`, `misa:${m.id}`, m.date]);
       seen.add(k);
       const dk = m.date + '|' + k;
       if (!perDay.has(dk)) perDay.set(dk, { name: n, list: [] });
@@ -713,7 +714,7 @@ function buildIssues() {
     }
   }
   for (const [dk, v] of perDay) {
-    if (v.list.length > 1) out.push(['ℹ️', `${v.name} bertugas ${v.list.length}× pada ${fmtShort(dk.split('|')[0])}: ${v.list.join(', ')}.`, `person:${norm(v.name)}`]);
+    if (v.list.length > 1) out.push(['ℹ️', `${v.name} bertugas ${v.list.length}× pada ${fmtShort(dk.split('|')[0])}: ${v.list.join(', ')}.`, `person:${norm(v.name)}`, dk.split('|')[0]]);
   }
   return out;
 }
@@ -737,13 +738,21 @@ function goIssue(link) {
   }
 }
 
+// Temuan [ikon, teks, tautan, tanggal]; yang bertanggal sebelum hari ini tidak ditampilkan
+function activeIssues() {
+  const today = iso(new Date());
+  return buildIssues().filter(i => !i[3] || i[3] >= today);
+}
+
 function renderCek(main) {
-  const issues = buildIssues();
+  const all = buildIssues(), issues = activeIssues(), past = all.length - issues.length;
+  const pastNote = past ? `<div class="count" style="margin:8px 2px 0">${past} catatan untuk tanggal yang sudah lewat tidak ditampilkan.</div>` : '';
   main.innerHTML = issues.length
     ? `<div class="count" style="margin:0 2px 8px">${issues.length} catatan · ❗ perlu diperbaiki · ⚠️ belum lengkap · ℹ️ info</div>
        <div class="list">${issues.map(([ic, t, link]) => `<div class="issue${link ? ' tap' : ''}" ${link ? `data-act="cek-go" data-k="${h(link)}"` : ''}>
-         <span class="ic">${ic}</span><span class="tx">${h(t)}</span>${link ? '<span class="go">›</span>' : ''}</div>`).join('')}</div>`
-    : '<div class="ok">✅ Tidak ada masalah pada jadwal bulan ini.</div>';
+         <span class="ic">${ic}</span><span class="tx">${h(t)}</span>${link ? '<span class="go">›</span>' : ''}</div>`).join('')}</div>
+      ${pastNote}`
+    : `<div class="ok">✅ Tidak ada masalah pada jadwal bulan ini${past ? ' yang belum lewat' : ''}.</div>${pastNote}`;
 }
 
 /* ================= Sheet (dialog) ================= */
