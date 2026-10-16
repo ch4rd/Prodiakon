@@ -220,3 +220,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .profile-info { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px; background: #f6f9f7; border: 1px solid var(--line); border-radius: 8px; }
 .profile-info > div { display: flex; flex-direction: column; min-width: 0; }
 .profile-info b { font-size: .9rem; overflow-wrap: anywhere; }
+.issue.tap { cursor: pointer; align-items: center; }
+.issue.tap:active, .issue.tap:hover { background: #f7faf8; }
+.issue .tx { flex: 1; }
+.issue .go { flex: none; color: var(--muted); font-size: 1.2rem; }
