@@ -358,7 +358,7 @@ function buildAssignments() {
       add(n, {
         type: 'smk', date: lm?.date || we[i]?.sat || '', time: lm?.time || '', week: weeks()[i] || '',
         text: `Antaran SMK grup ${g.no} (${smkSlotLabel(g.slot)})`,
-        members: mem(g).map(m => m.nama),
+        members: mem(g), // detail umat (alamat, telp) dari Master umat
       });
     });
   }
@@ -394,7 +394,7 @@ function personDetail(p) {
   const items = p.items.map(i => `<div class="asg">
       <div class="d">${i.date ? h(fmtShort(i.date)) : ''}${i.time ? ' · pk ' + h(i.time) : ''}${i.week && i.type === 'smk' ? ' · minggu ' + h(i.week) : ''}</div>
       <div>${i.type === 'smk' ? '🕊️' : '⛪'} ${h(i.text)}${i.koor ? ' <b>(Koordinator)</b>' : ''}</div>
-      ${i.members ? `<div class="count">${h(i.members.join(', '))}</div>` : ''}
+      ${i.members ? (i.members.length ? `<div class="visit">${i.members.map(visitBlock).join('')}</div>` : '<div class="count">Belum ada umat di grup ini</div>') : ''}
     </div>`).join('');
   return `<button class="back" data-act="back">‹ Semua petugas</button>
     <h2 style="margin:0 0 10px">${h(p.name)}</h2>
@@ -404,11 +404,36 @@ function personDetail(p) {
     </div>`;
 }
 
+const mapsUrl = alamat => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(alamat)}`;
+
+// Umat yang dikunjungi petugas: alamat (+ peta), telp/WA, catatan
+function visitBlock(m) {
+  return `<div class="member">
+    <div><span class="nm">${h(m.nama)}</span>${m.lingkungan ? `<span class="ln">${h(m.lingkungan)}</span>` : ''}</div>
+    ${m.alamat ? `<div class="ad">📍 ${h(m.alamat)} <a class="map" href="${h(mapsUrl(m.alamat))}" target="_blank" rel="noopener">Peta</a></div>` : '<div class="ad warn">Alamat belum diisi di Master umat</div>'}
+    ${m.telp ? `<div class="phones">${phoneLinks(m.telp)}</div>` : ''}
+    ${m.note ? `<div class="ad">📝 ${h(m.note)}</div>` : ''}
+  </div>`;
+}
+
 function personText(p) {
   const lines = p.items.map(i => {
     const when = [i.date && fmtShort(i.date), i.time && 'pk ' + i.time].filter(Boolean).join(' ');
-    const extra = i.type === 'smk' && i.members?.length ? `: ${i.members.join(', ')}` : '';
-    return `• ${when} – ${i.text}${i.koor ? ' (Koordinator)' : ''}${extra}`;
+    let line = `• ${when} – ${i.text}${i.koor ? ' (Koordinator)' : ''}`;
+    if (i.type === 'smk') {
+      for (const m of i.members || []) {
+        line += `
+   – ${m.nama}${m.lingkungan ? ` (${m.lingkungan})` : ''}`;
+        if (m.alamat) line += `
+     📍 ${m.alamat}
+     ${mapsUrl(m.alamat)}`;
+        if (m.telp) line += `
+     📞 ${m.telp}`;
+        if (m.note) line += `
+     📝 ${m.note}`;
+      }
+    }
+    return line;
   });
   return `Jadwal tugas *${p.name}* – ${monthName(S.monthId)}\n${lines.join('\n')}`;
 }
