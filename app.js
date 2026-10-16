@@ -480,16 +480,17 @@ function openMisa(m) {
       <label class="fld">Warna liturgi<select name="color">${Object.entries(COLORS).map(([k, v]) => opt(k, v[0], m.color)).join('')}</select></label>
       <label class="fld">Jumlah dibutuhkan<input type="number" min="0" name="need" value="${m.need || 0}"></label>
     </div>
+    <div class="fld">Petugas <span id="offCount"></span></div>
+    <div class="chips" id="offChips"></div>
     <div class="grid2" style="grid-template-columns:1fr auto;align-items:end">
-      <label class="fld">Tambah petugas<input id="addName" list="names" placeholder="Ketik nama…"></label>
+      <label class="fld">Tambah petugas<input id="addName" list="names" placeholder="Pilih / ketik nama…" autocomplete="off"></label>
       <button type="button" class="btn" data-sh="add-name">Tambah</button>
     </div>
-    <label class="fld">Petugas (satu nama per baris)<textarea name="officers" rows="10">${h(m.officers.join('\n'))}</textarea></label>
     <label class="fld">Koordinator<select name="coordinator"></select></label>
     <label class="fld">Catatan<input name="note" value="${h(m.note)}"></label>`;
   openSheet(isNew ? 'Tambah misa' : 'Ubah misa', body, {
     save: async fd => {
-      const officers = String(fd.get('officers')).split('\n').map(s => s.trim()).filter(Boolean);
+      addNames($('#addName').value);
       const row = {
         ...m, date: fd.get('date'), slot: fd.get('slot'), title: fd.get('title').trim(), time: fd.get('time').trim(),
         place: fd.get('place').trim(), color: fd.get('color'), need: Number(fd.get('need')) || 0,
@@ -504,29 +505,54 @@ function openMisa(m) {
       await store.remove('misa', m.id);
       S.misa = S.misa.filter(x => x.id !== m.id); render(); toast('Dihapus');
     },
-    onClick: (b, f) => {
-      if (b.dataset.sh !== 'add-name') return;
-      const inp = $('#addName', f), v = inp.value.trim();
-      if (!v) return;
-      const ta = f.elements.officers;
-      ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + v;
-      inp.value = ''; inp.focus(); syncKoor();
+    onClick: b => {
+      if (b.dataset.sh === 'add-name') { addNames($('#addName').value); $('#addName').focus(); }
+      else if (b.dataset.sh === 'rm-off') { officers.splice(Number(b.dataset.i), 1); renderOfficers(); }
     },
   });
   const f = $('#sheetForm');
+  // Petugas dipilih satu per satu (chip); "Kevin, Sasa" otomatis dipecah jadi 2 nama.
+  const officers = [...m.officers];
+  const addNames = text => {
+    for (const raw of String(text).split(/[,;\n]+/)) {
+      const n = raw.trim().replace(/\s+/g, ' ');
+      if (!n) continue;
+      const known = allNames().find(x => norm(x) === norm(n));
+      if (!officers.some(x => norm(x) === norm(n))) officers.push(known || n);
+    }
+    $('#addName').value = '';
+    renderOfficers();
+  };
+  const renderOfficers = () => {
+    $('#offChips').innerHTML = officers.length
+      ? officers.map((n, i) => `<span class="chip edit">${h(n)}<button type="button" data-sh="rm-off" data-i="${i}" aria-label="Hapus ${h(n)}">✕</button></span>`).join('')
+      : '<span class="hint">Belum ada petugas.</span>';
+    $('#offCount').textContent = officers.length ? `(${officers.length}${m.need ? '/' + m.need : ''})` : '';
+    syncKoor();
+  };
   const syncKoor = () => {
     const sel = f.elements.coordinator, cur = sel.value || m.coordinator;
-    const names = f.elements.officers.value.split('\n').map(s => s.trim()).filter(Boolean);
-    const selected = names.find(n => norm(n) === norm(cur)) || '';
-    sel.innerHTML = opt('', '— belum ditentukan —', selected) + names.map(n => opt(n, n, selected)).join('');
+    const selected = officers.find(n => norm(n) === norm(cur)) || '';
+    sel.innerHTML = opt('', '— belum ditentukan —', selected) + officers.map(n => opt(n, n, selected)).join('');
   };
-  f.elements.officers.addEventListener('input', syncKoor);
+  const addInp = $('#addName');
+  addInp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); addNames(addInp.value); }
+  });
+  addInp.addEventListener('input', e => {
+    // Pilih dari daftar saran → langsung masuk; ketik koma → nama sebelum koma masuk.
+    if (e.inputType === 'insertReplacementText' || !e.inputType) addNames(addInp.value);
+    else if (/[,;]/.test(addInp.value)) {
+      const parts = addInp.value.split(/[,;]/), rest = parts.pop();
+      addNames(parts.join(',')); addInp.value = rest.trimStart();
+    }
+  });
   f.elements.slot.addEventListener('change', () => {
     const s = MISA_SLOTS.find(x => x.key === f.elements.slot.value);
     if (s?.time) f.elements.time.value = s.time;
     if (s && s.key !== 'LAIN' && !f.elements.title.value) f.elements.title.value = 'Minggu Biasa';
   });
-  syncKoor();
+  renderOfficers();
 }
 
 /* ---- Edit grup SMK ---- */
