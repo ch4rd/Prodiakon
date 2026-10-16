@@ -88,7 +88,7 @@ function download(name, text, type) {
 class LocalStore {
   constructor() { this.key = 'prodiakon.data.v1'; }
   read() {
-    const empty = { months: [], misa: [], smk_groups: [], umat: [] };
+    const empty = { months: [], misa: [], smk_groups: [], umat: [], petugas: [] };
     try { return { ...empty, ...JSON.parse(lsGet(this.key) || '{}') }; } catch { return empty; }
   }
   write(d) { localStorage.setItem(this.key, JSON.stringify(d)); }
@@ -168,6 +168,7 @@ const S = {
   admin: true, // false = hanya bisa melihat (bukan admin)
   umat: [], smkView: lsGet('prodiakon.smkView') || 'grup', umatQ: '',
   userId: null, pendingUsers: 0, me: null, pickName: false,
+  petugas: [], petugasView: 'tugas', petugasQ: '',
 };
 // Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
 let UM = new Map();
@@ -179,6 +180,17 @@ const mem = g => g.members.map(m => {
   const u = m.umat_id && UM.get(m.umat_id);
   return u ? { ...u, umat_id: u.id } : m;
 });
+// Master petugas: nama di jadwal hanya boleh dipilih dari sini
+function setPetugas(list) { S.petugas = list.sort((a, b) => a.nama.localeCompare(b.nama)); }
+const masterNames = () => S.petugas.filter(p => p.active).map(p => p.nama);
+const inMaster = n => S.petugas.find(p => norm(p.nama) === norm(n));
+// <option> petugas aktif; nama lama yang tidak ada di master tetap tampil agar tidak hilang diam-diam
+function petugasOpts(cur, placeholder, exclude = []) {
+  const ex = new Set(exclude.map(norm));
+  const names = masterNames().filter(n => !ex.has(norm(n)) || norm(n) === norm(cur));
+  const extra = cur && !names.some(n => norm(n) === norm(cur)) ? opt(cur, `${cur} (bukan dari master)`, cur) : '';
+  return opt('', placeholder, cur ? null : '') + extra + names.map(n => opt(n, n, names.find(x => norm(x) === norm(cur)))).join('');
+}
 const umatLabel = u => (u.lingkungan ? `${u.nama} · ${u.lingkungan}` : u.nama);
 const curMonth = () => S.months.find(m => m.id === S.monthId);
 const weeks = () => (curMonth()?.weeks || []);
@@ -198,17 +210,21 @@ async function loadMonths() {
 async function loadMonth() {
   if (S.monthId) {
     lsSet('prodiakon.month', S.monthId);
-    const [m, g, u] = await Promise.all([store.list('misa', S.monthId), store.list('smk_groups', S.monthId), store.list('umat')]);
+    const [m, g, u, pt] = await Promise.all([store.list('misa', S.monthId), store.list('smk_groups', S.monthId), store.list('umat'), store.list('petugas')]);
     S.misa = m;
     S.smk = g.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
-    setUmat(u);
+    setUmat(u); setPetugas(pt);
+    if (S.admin) {
+      const n = await syncPetugasFromSchedule();
+      if (n) toast(`${n} nama petugas dari jadwal dimasukkan ke Master petugas`);
+    }
     if (S.admin && S.smk.some(x => x.members.some(y => !y.umat_id))) {
       const n = await linkLegacy(S.smk);
       if (n) toast(`${n} umat dipindah ke Master umat`);
     }
   } else {
     S.misa = []; S.smk = [];
-    setUmat(await store.list('umat'));
+    setUmat(await store.list('umat')); setPetugas(await store.list('petugas'));
   }
   render();
 }
@@ -221,8 +237,8 @@ function render() {
   if (S.tab === 'cek' && !S.admin) S.tab = 'saya';
   $('.tabs [data-tab="cek"]').hidden = !S.admin;
   $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
-  $('#fab').hidden = !S.admin || !S.monthId || !['misa', 'smk'].includes(S.tab);
-  $('#names').innerHTML = allNames().map(n => `<option value="${h(n)}">`).join('');
+  $('#fab').hidden = !S.admin || !S.monthId || !(['misa', 'smk'].includes(S.tab) || (S.tab === 'petugas' && S.petugasView === 'master'));
+  $('#names').innerHTML = masterNames().map(n => `<option value="${h(n)}">`).join('');
   const n = buildIssues().length;
   $('#cekCount').textContent = n ? String(n) : '';
 
@@ -397,7 +413,13 @@ function renderPetugas(main) {
     if (p) { main.innerHTML = personDetail(p); return; }
     S.person = null;
   }
-  main.innerHTML = `<input class="search" id="pQ" type="search" placeholder="Cari nama petugas…" value="${h(S.personQ)}">
+  const v = S.petugasView === 'master' ? 'master' : 'tugas';
+  const bar = `<div class="bar">
+    <button class="pill ${v === 'tugas' ? 'on' : ''}" data-act="petugas-view" data-k="tugas">Tugas per petugas</button>
+    <button class="pill ${v === 'master' ? 'on' : ''}" data-act="petugas-view" data-k="master">Master petugas (${masterNames().length})</button>
+  </div>`;
+  if (v === 'master') return renderMasterPetugas(main, bar, all);
+  main.innerHTML = bar + `<input class="search" id="pQ" type="search" placeholder="Cari nama petugas…" value="${h(S.personQ)}">
     <div class="count" id="pCount" style="margin:0 2px 8px"></div><div id="pList"></div>`;
   const draw = () => {
     const q = norm(S.personQ);
@@ -411,6 +433,85 @@ function renderPetugas(main) {
   };
   $('#pQ').addEventListener('input', e => { S.personQ = e.target.value; draw(); });
   draw();
+}
+
+/* ---- Master petugas ---- */
+function renderMasterPetugas(main, bar, all) {
+  main.innerHTML = bar + `<input class="search" id="mpQ" type="search" placeholder="Cari nama petugas…" value="${h(S.petugasQ)}">
+    <div id="mpList"></div>`;
+  const draw = () => {
+    const q = norm(S.petugasQ);
+    const row = p => {
+      const a = all.find(x => x.key === norm(p.nama));
+      const mi = a ? a.items.filter(i => i.type === 'misa').length : 0, sm = a ? a.items.filter(i => i.type === 'smk').length : 0;
+      return `<div class="umat${S.admin ? ' tap' : ''}" ${S.admin ? `data-act="edit-petugas" data-id="${h(p.id)}"` : ''}>
+        <div><span class="nm">${h(p.nama)}</span></div>
+        ${p.telp ? `<div class="phones">${phoneLinks(p.telp)}</div>` : ''}
+        ${p.note ? `<div class="ad">📝 ${h(p.note)}</div>` : ''}
+        <div class="tags">${mi || sm ? `${mi ? `<span class="tag">${mi} misa</span>` : ''}${sm ? `<span class="tag">${sm} SMK</span>` : ''}`
+          : `<span class="tag ${p.active ? 'warn' : ''}">Tidak ada tugas bulan ini</span>`}</div>
+      </div>`;
+    };
+    const sec = (title, list) => (list.length ? `<div class="sec-title">${title} <span class="count">${list.length} orang</span></div>
+      <div class="list">${list.map(row).join('')}</div>` : '');
+    const match = p => !q || norm([p.nama, p.telp, p.note].join(' ')).includes(q);
+    const html = sec('Aktif', S.petugas.filter(p => p.active && match(p))) + sec('Tidak aktif', S.petugas.filter(p => !p.active && match(p)));
+    $('#mpList').innerHTML = html || `<div class="empty-state">${S.petugas.length ? 'Tidak ditemukan.' : `Belum ada petugas.${S.admin ? ' Tekan ＋ untuk menambah.' : ''}`}</div>`;
+  };
+  $('#mpQ').addEventListener('input', e => { S.petugasQ = e.target.value; draw(); });
+  draw();
+}
+
+function openPetugasForm(p) {
+  const isNew = !p;
+  p = p ? { ...p } : { id: uid(), nama: '', telp: '', note: '', active: true };
+  const body = `
+    <label class="fld">Nama (sesuai yang dipakai di jadwal)<input name="nama" required value="${h(p.nama)}"></label>
+    <label class="fld">Telp / HP<input name="telp" value="${h(p.telp)}" inputmode="tel"></label>
+    <label class="fld">Catatan<input name="note" value="${h(p.note)}"></label>
+    <label><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Aktif (bisa dipilih di jadwal)</label>
+    ${isNew ? '' : '<p class="hint">Mengganti nama akan ikut mengganti nama ini di semua jadwal misa & SMK.</p>'}`;
+  openSheet(isNew ? 'Petugas baru' : 'Ubah petugas', body, {
+    save: async fd => {
+      const row = { ...p, nama: fd.get('nama').trim().replace(/\s+/g, ' '), telp: fd.get('telp').trim(), note: fd.get('note').trim(), active: !!fd.get('active') };
+      if (!row.nama) { toast('Nama wajib diisi'); return false; }
+      if (S.petugas.some(x => x.id !== row.id && norm(x.nama) === norm(row.nama))) { toast(`"${row.nama}" sudah ada di master`); return false; }
+      await store.upsert('petugas', [row]);
+      if (!isNew && row.nama !== p.nama) await renameInSchedules(p.nama, row.nama);
+      setPetugas([...S.petugas.filter(x => x.id !== row.id), row]);
+      render(); toast('Tersimpan');
+    },
+    del: isNew ? null : async () => {
+      if (buildAssignments().some(a => a.key === norm(p.nama))) {
+        toast(`${p.nama} masih ada di jadwal bulan ini. Hapus dari jadwal dulu, atau tandai tidak aktif.`);
+        return false;
+      }
+      await store.remove('petugas', p.id);
+      setPetugas(S.petugas.filter(x => x.id !== p.id)); render(); toast('Dihapus');
+    },
+  });
+}
+
+// Ganti nama petugas di semua bulan (misa: officers + koordinator, SMK: petugas per minggu)
+async function renameInSchedules(oldName, newName) {
+  const k = norm(oldName), sw = n => (norm(n) === k ? newName : n);
+  const [misa, groups] = await Promise.all([store.list('misa'), store.list('smk_groups')]);
+  const mc = misa.filter(m => m.officers.some(n => norm(n) === k) || norm(m.coordinator) === k)
+    .map(m => ({ ...m, officers: m.officers.map(sw), coordinator: sw(m.coordinator) }));
+  const gc = groups.filter(g => g.officers.some(n => norm(n) === k)).map(g => ({ ...g, officers: g.officers.map(sw) }));
+  await store.upsert('misa', mc);
+  await store.upsert('smk_groups', gc);
+  S.misa = S.misa.map(m => mc.find(x => x.id === m.id) || m);
+  S.smk = S.smk.map(g => gc.find(x => x.id === g.id) || g);
+}
+
+// Nama yang sudah ada di jadwal tapi belum di master → dimasukkan (sekali, saat admin membuka bulan)
+async function syncPetugasFromSchedule() {
+  const add = allNames().filter(n => !inMaster(n)).map(nama => ({ id: uid(), nama, telp: '', note: '', active: true }));
+  if (!add.length) return 0;
+  await store.upsert('petugas', add);
+  setPetugas([...S.petugas, ...add]);
+  return add.length;
 }
 
 function asgItem(i, cls = '', tag = '') {
@@ -435,18 +536,18 @@ function personDetail(p) {
 // Urutan: nama yang ditautkan admin → pilihan di perangkat ini → nama saat mendaftar
 function myName(ignorePick = false) {
   if (S.pickName && !ignorePick) return '';
-  const all = allNames();
+  const all = [...masterNames(), ...allNames()];
   const pick = n => (n ? all.find(x => norm(x) === norm(n)) : null);
   return pick(S.me?.petugas) || pick(lsGet('prodiakon.myName')) || pick(S.me?.nama) || '';
 }
-const nameLocked = () => !!(S.me?.petugas && allNames().some(x => norm(x) === norm(S.me.petugas)));
+const nameLocked = () => !!(S.me?.petugas && [...masterNames(), ...allNames()].some(x => norm(x) === norm(S.me.petugas)));
 
 function renderSaya(main) {
   const name = myName();
   if (!name) {
     main.innerHTML = `<div class="pick-card">
       <h3>Siapa nama Anda di jadwal?</h3>
-      <input id="myNameInp" class="search" list="names" placeholder="Ketik / pilih nama Anda…" autocomplete="off">
+      <select id="myNameInp" class="search">${petugasOpts('', '— pilih nama Anda —')}</select>
       <button class="btn primary" data-act="set-myname">Tampilkan jadwal saya</button>
       ${S.pickName && myName(true) ?'<button class="link-btn" data-act="cancel-myname">Batal</button>' : ''}
       <p class="hint">Disimpan di perangkat ini. Admin juga bisa menautkan nama Anda ke akun (menu Pengguna).</p>
@@ -524,6 +625,11 @@ function buildIssues() {
         out.push(['❗', `${name} bertugas antar SMK grup ${g.no} (${w}) tapi tidak ada di jadwal misa ${g.slot} ${fmtShort(lm.date)}.`]);
       }
     });
+  }
+  for (const n of allNames()) {
+    const p = inMaster(n);
+    if (!p) out.push(['❗', `Petugas "${n}" ada di jadwal tapi tidak ada di Master petugas.`]);
+    else if (!p.active) out.push(['⚠️', `Petugas ${p.nama} sudah tidak aktif tapi masih ada di jadwal bulan ini.`]);
   }
   const asg = umatAssignments();
   for (const u of S.umat) {
@@ -616,15 +722,11 @@ function openMisa(m) {
     </div>
     <div class="fld">Petugas <span id="offCount"></span></div>
     <div class="chips" id="offChips"></div>
-    <div class="grid2" style="grid-template-columns:1fr auto;align-items:end">
-      <label class="fld">Tambah petugas<input id="addName" list="names" placeholder="Pilih / ketik nama…" autocomplete="off"></label>
-      <button type="button" class="btn" data-sh="add-name">Tambah</button>
-    </div>
+    <label class="fld">Tambah petugas (dari Master petugas)<select id="addName"></select></label>
     <label class="fld">Koordinator<select name="coordinator"></select></label>
     <label class="fld">Catatan<input name="note" value="${h(m.note)}"></label>`;
   openSheet(isNew ? 'Tambah misa' : 'Ubah misa', body, {
     save: async fd => {
-      addNames($('#addName').value);
       const row = {
         ...m, date: fd.get('date'), slot: fd.get('slot'), title: fd.get('title').trim(), time: fd.get('time').trim(),
         place: fd.get('place').trim(), color: fd.get('color'), need: Number(fd.get('need')) || 0,
@@ -640,26 +742,16 @@ function openMisa(m) {
       S.misa = S.misa.filter(x => x.id !== m.id); render(); toast('Dihapus');
     },
     onClick: b => {
-      if (b.dataset.sh === 'add-name') { addNames($('#addName').value); $('#addName').focus(); }
-      else if (b.dataset.sh === 'rm-off') { officers.splice(Number(b.dataset.i), 1); renderOfficers(); }
+      if (b.dataset.sh === 'rm-off') { officers.splice(Number(b.dataset.i), 1); renderOfficers(); }
     },
   });
   const f = $('#sheetForm');
-  // Petugas dipilih satu per satu (chip); "Kevin, Sasa" otomatis dipecah jadi 2 nama.
+  // Petugas hanya dipilih dari Master petugas (chip), tidak bisa diketik bebas.
   const officers = [...m.officers];
-  const addNames = text => {
-    for (const raw of String(text).split(/[,;\n]+/)) {
-      const n = raw.trim().replace(/\s+/g, ' ');
-      if (!n) continue;
-      const known = allNames().find(x => norm(x) === norm(n));
-      if (!officers.some(x => norm(x) === norm(n))) officers.push(known || n);
-    }
-    $('#addName').value = '';
-    renderOfficers();
-  };
   const renderOfficers = () => {
+    $('#addName').innerHTML = petugasOpts('', masterNames().length ? '＋ Pilih petugas…' : 'Master petugas masih kosong', officers);
     $('#offChips').innerHTML = officers.length
-      ? officers.map((n, i) => `<span class="chip edit">${h(n)}<button type="button" data-sh="rm-off" data-i="${i}" aria-label="Hapus ${h(n)}">✕</button></span>`).join('')
+      ? officers.map((n, i) => `<span class="chip edit${inMaster(n) ? '' : ' warn'}" title="${inMaster(n) ? '' : 'Tidak ada di Master petugas'}">${h(n)}<button type="button" data-sh="rm-off" data-i="${i}" aria-label="Hapus ${h(n)}">✕</button></span>`).join('')
       : '<span class="hint">Belum ada petugas.</span>';
     $('#offCount').textContent = officers.length ? `(${officers.length}${m.need ? '/' + m.need : ''})` : '';
     syncKoor();
@@ -669,17 +761,10 @@ function openMisa(m) {
     const selected = officers.find(n => norm(n) === norm(cur)) || '';
     sel.innerHTML = opt('', '— belum ditentukan —', selected) + officers.map(n => opt(n, n, selected)).join('');
   };
-  const addInp = $('#addName');
-  addInp.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); addNames(addInp.value); }
-  });
-  addInp.addEventListener('input', e => {
-    // Pilih dari daftar saran → langsung masuk; ketik koma → nama sebelum koma masuk.
-    if (e.inputType === 'insertReplacementText' || !e.inputType) addNames(addInp.value);
-    else if (/[,;]/.test(addInp.value)) {
-      const parts = addInp.value.split(/[,;]/), rest = parts.pop();
-      addNames(parts.join(',')); addInp.value = rest.trimStart();
-    }
+  $('#addName').addEventListener('change', e => {
+    const n = e.target.value;
+    if (n && !officers.some(x => norm(x) === norm(n))) officers.push(n);
+    renderOfficers();
   });
   f.elements.slot.addEventListener('change', () => {
     const s = MISA_SLOTS.find(x => x.key === f.elements.slot.value);
@@ -816,7 +901,7 @@ function openSmk(g) {
       <label class="fld">Jam layanan<select name="slot">${SMK_SLOTS.map(s => opt(s.key, s.label, g.slot)).join('')}</select></label>
     </div>
     <div class="fld">Petugas per minggu</div>
-    <div class="grid2">${weeks().map((w, i) => `<label class="fld">${h(w)}<input name="off${i}" list="names" value="${h(g.officers[i] || '')}"></label>`).join('')}</div>
+    <div class="grid2">${weeks().map((w, i) => `<label class="fld">${h(w)}<select name="off${i}">${petugasOpts(g.officers[i] || '', '— kosong —')}</select></label>`).join('')}</div>
     <div class="fld">Umat yang dilayani <span id="memCount"></span></div>
     <div id="memList" class="mem-list"></div>
     <div class="grid2" style="grid-template-columns:1fr auto;align-items:end">
@@ -991,6 +1076,10 @@ async function importData(data, msg) {
   await store.upsert('misa', withId(data.misa));
   await store.upsert('umat', withId(data.umat));
   setUmat(await store.list('umat'));
+  if (data.petugas?.length) {
+    const have = await store.list('petugas');
+    await store.upsert('petugas', withId(data.petugas).filter(p => !have.some(x => x.id !== p.id && norm(x.nama) === norm(p.nama))));
+  }
   const groups = withId(data.smk_groups);
   await linkLegacy(groups, false); // backup/seed lama: anggota → master umat
   await store.upsert('smk_groups', groups);
@@ -1002,8 +1091,8 @@ async function loadSeed() {
   await importData(seed, 'Data Oktober 2026 dimuat');
 }
 async function backup() {
-  const [months, misa, smk_groups, umat] = await Promise.all(['months', 'misa', 'smk_groups', 'umat'].map(k => store.list(k)));
-  download(`prodiakon-backup-${iso(new Date())}.json`, JSON.stringify({ app: 'prodiakon', version: 2, months, misa, smk_groups, umat }, null, 1), 'application/json');
+  const [months, misa, smk_groups, umat, petugas] = await Promise.all(['months', 'misa', 'smk_groups', 'umat', 'petugas'].map(k => store.list(k)));
+  download(`prodiakon-backup-${iso(new Date())}.json`, JSON.stringify({ app: 'prodiakon', version: 3, months, misa, smk_groups, umat, petugas }, null, 1), 'application/json');
 }
 $('#importFile').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = '';
@@ -1085,13 +1174,15 @@ $('#main').addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const { act, id, k } = el.dataset;
-  if (!S.admin && ['edit-misa', 'edit-smk', 'edit-umat', 'load-seed', 'new-month'].includes(act)) return;
+  if (!S.admin && ['edit-misa', 'edit-smk', 'edit-umat', 'edit-petugas', 'load-seed', 'new-month'].includes(act)) return;
   if (act === 'smk-view') { S.smkView = k; lsSet('prodiakon.smkView', k); render(); return; }
+  if (act === 'petugas-view') { S.petugasView = k; render(); return; }
+  if (act === 'edit-petugas') { openPetugasForm(S.petugas.find(p => p.id === id)); return; }
   if (act === 'change-myname') { S.pickName = true; render(); $('#myNameInp')?.focus(); return; }
   if (act === 'cancel-myname') { S.pickName = false; render(); return; }
   if (act === 'set-myname') {
-    const v = $('#myNameInp').value.trim(), n = allNames().find(x => norm(x) === norm(v));
-    if (!n) { toast(v ? `"${v}" tidak ada di jadwal bulan ini` : 'Pilih nama Anda dulu'); return; }
+    const n = $('#myNameInp').value;
+    if (!n) { toast('Pilih nama Anda dulu'); return; }
     lsSet('prodiakon.myName', n); S.pickName = false; render(); return;
   }
   if (act === 'edit-umat') { openUmat(UM.get(id)); return; }
@@ -1116,7 +1207,12 @@ $$('.tabs button').forEach(b => b.addEventListener('click', () => {
 }));
 $('#monthSel').addEventListener('change', e => { S.monthId = e.target.value; S.person = null; run(loadMonth); });
 $('#menuBtn').addEventListener('click', openMenu);
-$('#fab').addEventListener('click', () => S.admin && (S.tab !== 'smk' ? openMisa() : S.smkView === 'umat' ? openUmat() : openSmk()));
+$('#fab').addEventListener('click', () => {
+  if (!S.admin) return;
+  if (S.tab === 'petugas') openPetugasForm();
+  else if (S.tab === 'smk') (S.smkView === 'umat' ? openUmat() : openSmk());
+  else openMisa();
+});
 document.addEventListener('visibilitychange', () => {
   // ambil perubahan dari pengguna lain saat app dibuka kembali
   if (!document.hidden && ONLINE && !dlg.open && !$('#app').hidden) run(loadMonth);
@@ -1131,7 +1227,7 @@ async function openUsers() {
       u.status !== 'approved' && `<button type="button" class="btn small primary" data-sh="u-approved" data-id="${h(u.user_id)}">Setujui</button>`,
       u.status !== 'rejected' && `<button type="button" class="btn small" data-sh="u-rejected" data-id="${h(u.user_id)}">${u.status === 'approved' ? 'Cabut' : 'Tolak'}</button>`,
     ].filter(Boolean).join('');
-    const names = allNames(), cur = names.find(x => norm(x) === norm(u.petugas)) || u.petugas || '';
+    const names = masterNames(), cur = names.find(x => norm(x) === norm(u.petugas)) || u.petugas || '';
     const link = u.status === 'rejected' ? '' : `<label class="u-link">Nama di jadwal
         <select data-uid="${h(u.user_id)}">${opt('', '— belum ditautkan —', cur)}${(cur && !names.includes(cur) ? [cur] : []).concat(names).map(n => opt(n, n, cur)).join('')}</select></label>`;
     return `<div class="urow"><div class="mi"><span class="nm">${h(u.nama || '(tanpa nama)')}</span>

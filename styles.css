@@ -212,3 +212,6 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .empty-state.small { padding: 14px; background: var(--card); border: 1px dashed var(--line); border-radius: var(--radius); }
 .u-link { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: .75rem; color: var(--muted); }
 .u-link select { font-size: .85rem; padding: 5px 6px; border: 1px solid var(--line); border-radius: 6px; background: #fff; max-width: 100%; }
+/* Judul paroki */
+.brand { max-width: 900px; margin: 0 auto; font-size: .78rem; font-weight: 600; letter-spacing: .02em; opacity: .85; }
+.login-card .sub-title { margin: -6px 0 4px; color: var(--muted); font-size: .9rem; }
