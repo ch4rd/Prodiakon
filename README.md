@@ -14,13 +14,22 @@ Tanpa build: cukup file statis (HTML/CSS/JS).
 - `config.js` kosong → **mode Lokal**: data hanya di browser perangkat itu (untuk coba-coba).
 - `config.js` diisi → **mode Online (Supabase)**: data di cloud, wajib login, bisa dipakai bersama.
 
+## Multi-paroki
+Satu app & satu database untuk banyak paroki; data tiap paroki terpisah (dijaga RLS di database).
+- **Super admin**: tambah/ubah paroki (Menu ⋮ → Master paroki), bisa membuka semua paroki.
+- **Admin paroki**: kelola jadwal, master umat/petugas, pengguna, dan jam misa parokinya sendiri;
+  bisa mengangkat admin lain di parokinya (Menu ⋮ → Pengguna → Jadikan admin).
+- **Petugas**: daftar sendiri lewat link paroki `…/?p=kode-paroki`, disetujui admin, lalu melihat jadwal (tab Saya).
+
 ## Setup Supabase (gratis)
 1. Daftar di https://supabase.com → **New project** (region: Singapore).
-2. **SQL Editor** → New query → paste isi `supabase/schema.sql` → **Run**.
-3. **Authentication → Sign In / Providers**: matikan *Allow new users to sign up*.
-4. **Authentication → Users → Add user**: buat akun (email + password) untuk tiap pengelola.
-5. **Project Settings → API**: salin *Project URL* dan *anon public key* ke `config.js`.
-6. Buka app, login, lalu **Menu ⋮ → Muat data Oktober 2026** (atau Import backup JSON dari mode lokal).
+2. **SQL Editor** → New query → paste isi `supabase/schema.sql` → **Run** (aman dijalankan ulang;
+   data versi satu-paroki otomatis dipindah ke paroki pertama).
+3. **Authentication → Sign In / Providers**: *Allow new users to sign up* ON, *Confirm email* OFF (disarankan).
+4. **Project Settings → API**: salin *Project URL* dan *publishable/anon key* ke `config.js`.
+5. Daftar akun Anda dari app, lalu jadikan super admin (SQL Editor, ganti emailnya):
+   `insert into public.super_admins (user_id, email) select id, email from auth.users where email = 'nama@contoh.com' on conflict do nothing;`
+6. Login → Menu ⋮ → **Master paroki** untuk menambah paroki dan membagikan linknya.
 
 ## Deploy (gratis)
 Pilih salah satu, upload seluruh folder ini:

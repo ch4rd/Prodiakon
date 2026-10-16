@@ -4,22 +4,31 @@
 const CFG = window.APP_CONFIG || {};
 const ONLINE = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
 
-const MISA_SLOTS = [
-  { key: 'M1', label: 'Sabtu 17.30', time: '17.30' },
-  { key: 'M2', label: 'Minggu 06.00', time: '06.00' },
-  { key: 'M3', label: 'Minggu 08.30', time: '08.30' },
-  { key: 'M4', label: 'Minggu 17.30', time: '17.30' },
-  { key: 'LAIN', label: 'Misa lainnya', time: '' },
-];
-const SMK_SLOTS = [
-  { key: 'M1', label: 'Sabtu, pk 17.30' },
-  { key: 'M2', label: 'Minggu, pk 06.00' },
-  { key: 'M3', label: 'Minggu, pk 08.30' },
-  { key: 'M4', label: 'Minggu, pk 17.30' },
-  { key: 'PRIVAT', label: 'Privat (petugas tetap)' },
-  { key: 'JUMAT', label: 'Jumat (Suster)' },
-];
-const REGULAR = ['M1', 'M2', 'M3', 'M4'];
+// Pengaturan paroki (jam misa, slot SMK) dibaca dari tabel paroki; ini default untuk mode lokal.
+const DEFAULT_PAROKI = {
+  id: 'local', slug: 'albertus', nama: 'St. Albertus', kota: 'Harapan Indah, Bekasi', active: true,
+  misa_slots: [
+    { key: 'M1', day: 6, time: '17.30' }, { key: 'M2', day: 0, time: '06.00' },
+    { key: 'M3', day: 0, time: '08.30' }, { key: 'M4', day: 0, time: '17.30' },
+  ],
+  smk_extra: [{ key: 'PRIVAT', label: 'Privat (petugas tetap)' }, { key: 'JUMAT', label: 'Jumat (Suster)' }],
+};
+let P = DEFAULT_PAROKI;      // paroki aktif
+let MISA_SLOTS = [];         // [{key, day, time, label}] + LAIN
+let SMK_SLOTS = [];          // slot jam misa + slot tambahan
+let REGULAR = [];            // kode slot misa rutin
+function applyParoki(p) {
+  P = p;
+  const reg = (p.misa_slots || []).filter(x => x.key && x.key !== 'LAIN');
+  REGULAR = reg.map(x => x.key);
+  MISA_SLOTS = [...reg.map(x => ({ ...x, label: `${DAYS[x.day] ?? ''} ${x.time}`.trim() })), { key: 'LAIN', label: 'Misa lainnya', time: '' }];
+  SMK_SLOTS = [...reg.map(x => ({ key: x.key, label: `${DAYS[x.day] ?? ''}, pk ${x.time}` })), ...(p.smk_extra || [])];
+  document.title = `Prodiakon ${p.nama}`;
+  $$('.paroki-name').forEach(el => { el.textContent = p.nama; });
+}
+// Tanggal misa rutin pada akhir pekan tsb: Minggu = hari Minggu, Sabtu = sehari sebelumnya, dst.
+const slotDate = (slot, sunIso) => { const d = parseD(sunIso); d.setDate(d.getDate() + (slot.day ? slot.day - 7 : 0)); return iso(d); };
+const urlSlug = () => new URLSearchParams(location.search).get('p')?.trim().toLowerCase() || '';
 // warna liturgi: [label, warna penanda]
 const COLORS = {
   '': ['—', '#facc15'],
@@ -118,7 +127,7 @@ class LocalStore {
 class SupaStore {
   constructor() { this.sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY); }
   async list(kind, monthId) {
-    let q = this.sb.from(kind).select('*');
+    let q = this.sb.from(kind).select('*').eq('paroki_id', P.id);
     if (monthId) q = q.eq('month_id', monthId);
     const { data, error } = await q;
     if (error) throw error;
@@ -126,26 +135,55 @@ class SupaStore {
   }
   async upsert(kind, rows) {
     if (!rows.length) return;
-    const clean = rows.map(({ updated_at, ...r }) => r);
+    const clean = rows.map(({ updated_at, ...r }) => ({ ...r, paroki_id: P.id }));
     const { error } = await this.sb.from(kind).upsert(clean);
     if (error) throw error;
   }
   async remove(kind, id) {
-    const { error } = await this.sb.from(kind).delete().eq('id', id);
+    const { error } = await this.sb.from(kind).delete().eq('id', id).eq('paroki_id', P.id);
     if (error) throw error;
   }
-  async isAdmin() {
-    const { data, error } = await this.sb.rpc('is_admin');
+  async isAdmin(pid = P.id) {
+    const { data, error } = await this.sb.rpc('is_admin_of', { p: pid });
     return !error && data === true;
+  }
+  async isSuper() {
+    const { data, error } = await this.sb.rpc('is_super');
+    return !error && data === true;
+  }
+  async listParoki() {
+    const { data, error } = await this.sb.from('paroki').select('*').order('nama');
+    if (error) throw error;
+    return data;
+  }
+  async saveParoki(row) {
+    const { data, error } = await this.sb.from('paroki').upsert(row).select().single();
+    if (error) throw error;
+    return data;
+  }
+  async listAdmins() {
+    const { data, error } = await this.sb.from('admins').select('user_id').eq('paroki_id', P.id);
+    if (error) throw error;
+    return data.map(x => x.user_id);
+  }
+  async setAdmin(u, on) {
+    const q = on
+      ? this.sb.from('admins').insert({ user_id: u.user_id, paroki_id: P.id, email: u.email })
+      : this.sb.from('admins').delete().eq('user_id', u.user_id).eq('paroki_id', P.id);
+    const { error } = await q;
+    if (error) throw error;
   }
   // Status persetujuan akun yang sedang login: pending | approved | rejected
   async me() {
     const { data: { user } } = await this.sb.auth.getUser();
     const { data } = await this.sb.from('app_users').select('*').eq('user_id', user.id).maybeSingle();
-    return { id: user.id, email: user.email, status: data?.status || 'pending', nama: data?.nama || '', petugas: data?.petugas || '' };
+    return {
+      id: user.id, email: user.email, status: data?.status || 'pending', nama: data?.nama || '',
+      petugas: data?.petugas || '', paroki_id: data?.paroki_id || null,
+    };
   }
   async listUsers() {
-    const { data, error } = await this.sb.from('app_users').select('*').order('created_at');
+    const { data, error } = await this.sb.from('app_users').select('*').eq('paroki_id', P.id).order('created_at');
     if (error) throw error;
     return data;
   }
@@ -169,6 +207,7 @@ const S = {
   umat: [], smkView: lsGet('prodiakon.smkView') || 'grup', umatQ: '',
   userId: null, pendingUsers: 0, me: null, pickName: false,
   petugas: [], petugasView: 'tugas', petugasQ: '',
+  super: false, parokiList: [],
 };
 // Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
 let UM = new Map();
@@ -191,6 +230,7 @@ function petugasOpts(cur, placeholder, exclude = []) {
   const extra = cur && !names.some(n => norm(n) === norm(cur)) ? opt(cur, `${cur} (bukan dari master)`, cur) : '';
   return opt('', placeholder, cur ? null : '') + extra + names.map(n => opt(n, n, names.find(x => norm(x) === norm(cur)))).join('');
 }
+const hasSeedData = () => !!window.SEED && P.slug === 'albertus'; // data awal hanya milik St. Albertus
 const umatLabel = u => (u.lingkungan ? `${u.nama} · ${u.lingkungan}` : u.nama);
 const curMonth = () => S.months.find(m => m.id === S.monthId);
 const weeks = () => (curMonth()?.weeks || []);
@@ -256,7 +296,7 @@ function emptyState() {
   return `<div class="empty-state">
     <p>Belum ada data bulan apa pun.</p>
     <div class="btns" style="justify-content:center">
-      ${window.SEED ? `<button class="btn primary" data-act="load-seed">Muat data Oktober 2026</button>` : ""}
+      ${hasSeedData() ? `<button class="btn primary" data-act="load-seed">Muat data Oktober 2026</button>` : ""}
       <button class="btn" data-act="new-month">Buat bulan baru</button>
     </div></div>`;
 }
@@ -995,7 +1035,7 @@ function openNewMonth() {
         for (const w of we) {
           for (const s of REGULAR) {
             misa.push({
-              id: uid(), month_id: ym, date: s === 'M1' ? w.sat : w.sun, slot: s, title: 'Minggu Biasa',
+              id: uid(), month_id: ym, date: slotDate(slotByKey(s), w.sun), slot: s, title: 'Minggu Biasa',
               time: slotByKey(s).time, place: '', color: 'hijau', need: 0, officers: [], coordinator: '', note: '',
             });
           }
@@ -1046,20 +1086,25 @@ function openMenu() {
     S.monthId && ['csv', '📄 Export daftar SMK (CSV/Excel)'],
     ['backup', '💾 Backup semua data (JSON)'],
     S.admin && ['import', '📥 Import dari backup JSON'],
-    S.admin && window.SEED && !hasSeed && ['load-seed', '🧾 Muat data Oktober 2026'],
+    S.admin && hasSeedData() && !hasSeed && ['load-seed', '🧾 Muat data Oktober 2026'],
     ONLINE && S.admin && ['users', `👥 Pengguna${S.pendingUsers ? ` (${S.pendingUsers} menunggu)` : ''}`],
+    S.admin && ['paroki-settings', '⛪ Pengaturan paroki (nama, jam misa)'],
+    ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
   const body = `<div class="menu-list">${items.map(([k, l]) => `<button type="button" data-sh="menu" data-k="${k}">${h(l)}</button>`).join('')}</div>
-    <p class="hint">Mode: ${ONLINE ? `Online (Supabase) · ${S.admin ? 'Admin – bisa mengubah' : 'Lihat saja – hanya admin yang bisa mengubah'}` : 'Lokal – data hanya di perangkat ini. Isi config.js untuk menyambung ke Supabase.'}</p>`;
+    <p class="hint">Paroki: <b>${h(P.nama)}</b>${P.kota ? ` · ${h(P.kota)}` : ''}</p>
+    <p class="hint">Mode: ${ONLINE ? `Online (Supabase) · ${S.super ? 'Super admin' : S.admin ? 'Admin – bisa mengubah' : 'Lihat saja – hanya admin yang bisa mengubah'}` : 'Lokal – data hanya di perangkat ini. Isi config.js untuk menyambung ke Supabase.'}</p>`;
   openSheet('Menu', body, {
     onClick: (b) => { dlg.close(); menuAction(b.dataset.k); },
   });
 }
 
 async function menuAction(k) {
-  if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users'].includes(k)) return;
+  if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users', 'paroki-settings'].includes(k)) return;
   if (k === 'users') return run(openUsers);
+  if (k === 'paroki-settings') return openParokiForm(P);
+  if (k === 'paroki') return S.super && run(openMasterParoki);
   if (k === 'new-month') openNewMonth();
   else if (k === 'settings') openMonthSettings();
   else if (k === 'print') printView();
@@ -1234,19 +1279,20 @@ async function approveToMaster(u, bound = '') {
   return p.nama;
 }
 async function openUsers() {
-  const list = await store.listUsers();
+  const [list, admins] = await Promise.all([store.listUsers(), store.listAdmins().catch(() => [])]);
   S.pendingUsers = list.filter(u => u.status === 'pending').length;
   const row = u => {
     const btns = u.user_id === S.userId ? '<span class="tag">Anda</span>' : [
       u.status !== 'approved' && `<button type="button" class="btn small primary" data-sh="u-approved" data-id="${h(u.user_id)}">Setujui</button>`,
       u.status !== 'rejected' && `<button type="button" class="btn small" data-sh="u-rejected" data-id="${h(u.user_id)}">${u.status === 'approved' ? 'Cabut' : 'Tolak'}</button>`,
+      u.status === 'approved' && `<button type="button" class="btn small" data-sh="u-admin" data-id="${h(u.user_id)}">${admins.includes(u.user_id) ? 'Cabut admin' : 'Jadikan admin'}</button>`,
     ].filter(Boolean).join('');
     const names = masterNames();
     const cur = names.find(x => norm(x) === norm(u.petugas)) || u.petugas
       || (u.status === 'pending' ? names.find(x => norm(x) === norm(u.nama)) || '' : '');
     const link = u.status === 'rejected' ? '' : `<label class="u-link">Nama di jadwal
         <select data-uid="${h(u.user_id)}">${opt('', '— belum ditautkan —', cur)}${(cur && !names.includes(cur) ? [cur] : []).concat(names).map(n => opt(n, n, cur)).join('')}</select></label>`;
-    return `<div class="urow"><div class="mi"><span class="nm">${h(u.nama || '(tanpa nama)')}</span>
+    return `<div class="urow"><div class="mi"><span class="nm">${h(u.nama || '(tanpa nama)')}</span>${admins.includes(u.user_id) ? ' <span class="tag">Admin</span>' : ''}
       <div class="ad">${h(u.email)} · daftar ${h(fmtShort(u.created_at.slice(0, 10)))}</div>
       ${u.wa ? `<div class="phones">${phoneLinks(u.wa)}</div>` : ''}${link}</div>${btns}</div>`;
   };
@@ -1260,6 +1306,13 @@ async function openUsers() {
     + '<p class="hint">Yang disetujui bisa melihat jadwal & alamat umat (tanpa bisa mengubah). Hak admin diatur di Supabase SQL Editor (tabel admins).</p>';
   openSheet('Pengguna', body, {
     onClick: async b => {
+      if (b.dataset.sh === 'u-admin') {
+        const u = list.find(x => x.user_id === b.dataset.id), on = !admins.includes(u.user_id);
+        if (!confirm(on ? `Jadikan ${u.nama || u.email} admin ${P.nama}? Admin bisa mengubah semua data paroki ini.` : `Cabut hak admin ${u.nama || u.email}?`)) return;
+        if ((await run(() => store.setAdmin(u, on))) === false) return;
+        toast(on ? 'Sekarang admin' : 'Hak admin dicabut');
+        dlg.close(); await run(openUsers); return;
+      }
       const st = { 'u-approved': 'approved', 'u-rejected': 'rejected' }[b.dataset.sh];
       if (!st) return;
       if (st === 'rejected' && !confirm('Tolak / cabut akses pengguna ini?')) return;
@@ -1282,6 +1335,88 @@ async function openUsers() {
   })));
 }
 
+/* ---- Paroki ---- */
+const HARI = { minggu: 0, senin: 1, selasa: 2, rabu: 3, kamis: 4, jumat: 5, "jum'at": 5, sabtu: 6 };
+const slotsToText = p => (p.misa_slots || []).map(x => `${x.key} | ${DAYS[x.day]} | ${x.time}`).join('\n');
+const extraToText = p => (p.smk_extra || []).map(x => `${x.key} | ${x.label}`).join('\n');
+function parseSlots(text) {
+  const out = [];
+  for (const [i, line] of String(text).split('\n').entries()) {
+    if (!line.trim()) continue;
+    const [key, hari, time] = line.split('|').map(x => (x || '').trim());
+    const day = HARI[norm(hari)];
+    if (!key || day === undefined || !/^\d{1,2}[.:]\d{2}$/.test(time)) throw new Error(`Jam misa baris ${i + 1} tidak sesuai format "M1 | Sabtu | 17.30"`);
+    if (key.toUpperCase() === 'LAIN') throw new Error('Kode "LAIN" sudah dipakai untuk misa khusus');
+    out.push({ key: key.toUpperCase(), day, time: time.replace(':', '.') });
+  }
+  if (new Set(out.map(x => x.key)).size !== out.length) throw new Error('Kode jam misa ada yang dobel');
+  return out;
+}
+function parseExtra(text) {
+  return String(text).split('\n').filter(l => l.trim()).map((line, i) => {
+    const [key, label] = line.split('|').map(x => (x || '').trim());
+    if (!key || !label) throw new Error(`Slot SMK baris ${i + 1} tidak sesuai format "PRIVAT | Privat (petugas tetap)"`);
+    return { key: key.toUpperCase(), label };
+  });
+}
+const parokiLink = p => `${location.origin}${location.pathname}?p=${encodeURIComponent(p.slug)}`;
+
+// Tambah / ubah paroki. Admin paroki mengubah parokinya; slug & aktif hanya super admin.
+function openParokiForm(p) {
+  const isNew = !p;
+  p = p ? structuredClone(p) : { slug: '', nama: '', kota: '', misa_slots: DEFAULT_PAROKI.misa_slots, smk_extra: [], active: true };
+  const body = `
+    <label class="fld">Nama paroki (tampil sebagai "Prodiakon …")<input name="nama" required value="${h(p.nama)}" placeholder="St. Albertus"></label>
+    <label class="fld">Kota / lokasi<input name="kota" value="${h(p.kota)}" placeholder="Harapan Indah, Bekasi"></label>
+    ${S.super ? `<label class="fld">Kode link (huruf kecil, angka, tanda -)<input name="slug" required value="${h(p.slug)}" placeholder="albertus" pattern="[a-z0-9-]+"></label>
+      <label><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Aktif (bisa dipilih saat daftar)</label>` : ''}
+    ${p.slug ? `<p class="hint">Link paroki: <b>${h(parokiLink(p))}</b></p>` : ''}
+    <label class="fld">Jam misa rutin (satu per baris: Kode | Hari | Jam)<textarea name="slots" rows="5">${h(slotsToText(p))}</textarea></label>
+    <label class="fld">Slot SMK tambahan di luar jam misa (Kode | Nama)<textarea name="extra" rows="3">${h(extraToText(p))}</textarea></label>
+    <p class="hint">Contoh jam misa: <code>M1 | Sabtu | 17.30</code>. Mengubah kode jam misa tidak mengubah jadwal yang sudah dibuat.</p>`;
+  openSheet(isNew ? 'Paroki baru' : `Pengaturan ${p.nama}`, body, {
+    save: async fd => {
+      const row = {
+        ...(p.id ? { id: p.id } : {}), nama: fd.get('nama').trim(), kota: fd.get('kota').trim(),
+        slug: S.super ? fd.get('slug').trim().toLowerCase() : p.slug,
+        active: S.super ? !!fd.get('active') : p.active,
+        misa_slots: parseSlots(fd.get('slots')), smk_extra: parseExtra(fd.get('extra')),
+      };
+      if (!row.nama) throw new Error('Nama paroki wajib diisi');
+      if (!/^[a-z0-9-]+$/.test(row.slug)) throw new Error('Kode link hanya huruf kecil, angka, dan tanda -');
+      if (!ONLINE) { applyParoki({ ...P, ...row }); render(); toast('Tersimpan (mode lokal)'); return; }
+      const saved = await store.saveParoki(row);
+      S.parokiList = [...S.parokiList.filter(x => x.id !== saved.id), saved].sort((a, b) => a.nama.localeCompare(b.nama));
+      if (saved.id === P.id) { applyParoki(saved); render(); }
+      toast(isNew ? `Paroki ${saved.nama} dibuat` : 'Tersimpan');
+    },
+  });
+}
+
+async function openMasterParoki() {
+  S.parokiList = await store.listParoki();
+  const rows = S.parokiList.map(p => `<div class="urow"><div class="mi">
+      <span class="nm">${h(p.nama)}</span>${p.id === P.id ? ' <span class="tag">Sedang dibuka</span>' : ''}${p.active ? '' : ' <span class="tag warn">Nonaktif</span>'}
+      <div class="ad">${h(p.kota || '')}${p.kota ? ' · ' : ''}?p=${h(p.slug)}</div></div>
+      <button type="button" class="btn small" data-sh="p-link" data-id="${h(p.id)}">Salin link</button>
+      ${p.id === P.id ? '' : `<button type="button" class="btn small primary" data-sh="p-open" data-id="${h(p.id)}">Buka</button>`}
+      <button type="button" class="btn small" data-sh="p-edit" data-id="${h(p.id)}">Ubah</button></div>`).join('');
+  const body = `<div class="list">${rows || '<div class="empty-state">Belum ada paroki.</div>'}</div>
+    <button type="button" class="btn primary" data-sh="p-new">＋ Paroki baru</button>
+    <p class="hint">Paroki baru: bagikan linknya ke calon admin, minta mendaftar, lalu buka paroki itu → Pengguna → Setujui → Jadikan admin.</p>`;
+  openSheet('Master paroki', body, {
+    onClick: b => {
+      const p = S.parokiList.find(x => x.id === b.dataset.id);
+      if (b.dataset.sh === 'p-new') { dlg.close(); openParokiForm(); }
+      else if (b.dataset.sh === 'p-edit') { dlg.close(); openParokiForm(p); }
+      else if (b.dataset.sh === 'p-open') { lsSet('prodiakon.paroki', p.slug); location.href = parokiLink(p); }
+      else if (b.dataset.sh === 'p-link') {
+        navigator.clipboard.writeText(parokiLink(p)).then(() => toast('Link disalin'), () => toast(parokiLink(p)));
+      }
+    },
+  });
+}
+
 /* ================= Boot ================= */
 let authMode = 'login';
 // No. WA → format 08xxxxxxxxxx ('' bila tidak valid). Terima 08…, 628…, +62 8…
@@ -1295,6 +1430,7 @@ function setAuthMode(mode, hint = '') {
   const su = mode === 'signup', f = $('#loginForm');
   $('#namaFld').hidden = !su; f.elements.nama.required = su;
   $('#waFld').hidden = !su; f.elements.wa.required = su;
+  $('#parokiFld').hidden = !su;
   f.elements.password.autocomplete = su ? 'new-password' : 'current-password';
   $('#authBtn').textContent = su ? 'Daftar' : 'Masuk';
   $('#authToggle').textContent = su ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar';
@@ -1307,19 +1443,26 @@ function showLogin() {
 }
 function showPending(me) {
   $('#app').hidden = true; $('#login').hidden = false; $('#loginForm').hidden = true; $('#pending').hidden = false;
-  const rej = me.status === 'rejected';
-  $('#pendingTitle').textContent = rej ? 'Pendaftaran tidak disetujui' : 'Menunggu persetujuan admin';
-  $('#pendingText').textContent = rej
-    ? `Akun ${me.email} tidak disetujui. Hubungi admin bila ini keliru.`
-    : `Akun ${me.email} sudah terdaftar. Admin perlu menyetujuinya dulu sebelum Anda bisa melihat jadwal. Tekan "Cek lagi" setelah disetujui.`;
+  const rej = me.status === 'rejected', none = me.status === 'no-paroki';
+  $('#pendingTitle').textContent = none ? 'Akun belum terhubung ke paroki' : rej ? 'Pendaftaran tidak disetujui' : 'Menunggu persetujuan admin';
+  $('#pendingText').textContent = none
+    ? `Akun ${me.email} belum terdaftar di paroki mana pun. Hubungi admin paroki Anda.`
+    : rej
+      ? `Akun ${me.email} tidak disetujui. Hubungi admin bila ini keliru.`
+      : `Akun ${me.email} sudah terdaftar di ${P.nama}. Admin perlu menyetujuinya dulu sebelum Anda bisa melihat jadwal. Tekan "Cek lagi" setelah disetujui.`;
 }
 async function showApp() {
   if (ONLINE) {
     const me = await store.me();
     S.userId = me.id; S.me = me;
+    S.super = await store.isSuper();
+    S.parokiList = await store.listParoki().catch(() => []);
+    const p = await pickParoki(me);
+    if (!p) return showPending({ ...me, status: 'no-paroki' });
+    applyParoki(p); lsSet('prodiakon.paroki', p.slug);
     S.admin = await store.isAdmin();
     if (!S.admin && me.status !== 'approved') return showPending(me);
-    $('#modeBadge').textContent = S.admin ? 'Admin' : 'Lihat saja';
+    $('#modeBadge').textContent = S.super ? 'Super admin' : S.admin ? 'Admin' : 'Lihat saja';
     if (!S.admin && !lsGet('prodiakon.tab')) S.tab = 'saya'; // petugas: langsung jadwal sendiri
   }
   $('#login').hidden = true; $('#app').hidden = false;
@@ -1330,6 +1473,17 @@ async function showApp() {
     if (S.pendingUsers) toast(`${S.pendingUsers} pendaftar menunggu persetujuan (Menu ⋮ → Pengguna)`);
   }
 }
+// Paroki yang dibuka: super admin bebas (link ?p / terakhir dibuka); lainnya paroki akunnya,
+// kecuali ia juga admin di paroki pada link ?p.
+async function pickParoki(me) {
+  const all = S.parokiList, want = urlSlug() || lsGet('prodiakon.paroki');
+  const own = all.find(x => x.id === me.paroki_id);
+  if (S.super) return all.find(x => x.slug === want) || own || all[0] || null;
+  const other = want && want !== own?.slug ? all.find(x => x.slug === want) : null;
+  if (other && await store.isAdmin(other.id)) return other;
+  return own || null;
+}
+
 async function onAuthSubmit(e) {
   e.preventDefault();
   const fd = new FormData(e.target), email = fd.get('email').trim(), password = fd.get('password');
@@ -1339,9 +1493,11 @@ async function onAuthSubmit(e) {
     if (authMode === 'signup') {
       const wa = normWa(fd.get('wa'));
       if (!wa) { err.textContent = 'No. WA tidak valid. Contoh: 081234567890'; return; }
+      const paroki = fd.get('paroki') || '';
+      if (!paroki) { err.textContent = 'Pilih paroki Anda.'; return; }
       const { data, error } = await store.sb.auth.signUp({
         email, password,
-        options: { data: { nama: fd.get('nama').trim(), wa }, emailRedirectTo: location.origin + location.pathname },
+        options: { data: { nama: fd.get('nama').trim(), wa, paroki }, emailRedirectTo: parokiLink({ slug: paroki }) },
       });
       if (error) {
         err.textContent = /not allowed|disabled/i.test(error.message) ? 'Pendaftaran sedang ditutup. Hubungi admin.' : 'Daftar gagal: ' + error.message;
@@ -1361,7 +1517,16 @@ async function onAuthSubmit(e) {
 async function boot() {
   store = ONLINE ? new SupaStore() : new LocalStore();
   $('#modeBadge').textContent = ONLINE ? 'Online' : 'Lokal';
+  applyParoki(DEFAULT_PAROKI);
   if (!ONLINE) return showApp();
+  // Halaman login/daftar: nama paroki dari link ?p=, atau pilih paroki saat daftar
+  S.parokiList = await store.listParoki().catch(() => []);
+  const linked = S.parokiList.find(x => x.slug === (urlSlug() || lsGet('prodiakon.paroki')));
+  applyParoki(linked || { ...DEFAULT_PAROKI, nama: S.parokiList.length === 1 ? S.parokiList[0].nama : 'Gereja Katolik' });
+  const sel = $('#loginForm').elements.paroki;
+  sel.innerHTML = opt('', '— pilih paroki —', linked?.slug || '')
+    + S.parokiList.filter(x => x.active).map(x => opt(x.slug, x.kota ? `${x.nama} – ${x.kota}` : x.nama, linked?.slug || '')).join('');
+  if (S.parokiList.length === 1 && !linked) sel.value = S.parokiList[0].slug;
   $('#loginForm').addEventListener('submit', onAuthSubmit);
   $('#authToggle').addEventListener('click', () => setAuthMode(authMode === 'login' ? 'signup' : 'login'));
   $('#pendingRetry').addEventListener('click', () => run(showApp));

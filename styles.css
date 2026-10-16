@@ -215,3 +215,4 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 /* Judul paroki */
 .brand { max-width: 900px; margin: 0 auto; font-size: .78rem; font-weight: 600; letter-spacing: .02em; opacity: .85; }
 .login-card .sub-title { margin: -6px 0 4px; color: var(--muted); font-size: .9rem; }
+.login-card select { padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 1rem; background: #fff; }
