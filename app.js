@@ -147,6 +147,14 @@ class SupaStore {
     const { data, error } = await this.sb.rpc('is_admin_of', { p: pid });
     return !error && data === true;
   }
+  async updateMyProfile(nama, wa) {
+    const { error } = await this.sb.rpc('update_my_profile', { p_nama: nama, p_wa: wa });
+    if (error) throw error;
+  }
+  async changePassword(password) {
+    const { error } = await this.sb.auth.updateUser({ password });
+    if (error) throw error;
+  }
   async isSuper() {
     const { data, error } = await this.sb.rpc('is_super');
     return !error && data === true;
@@ -179,7 +187,7 @@ class SupaStore {
     const { data } = await this.sb.from('app_users').select('*').eq('user_id', user.id).maybeSingle();
     return {
       id: user.id, email: user.email, status: data?.status || 'pending', nama: data?.nama || '',
-      petugas: data?.petugas || '', paroki_id: data?.paroki_id || null,
+      petugas: data?.petugas || '', paroki_id: data?.paroki_id || null, wa: data?.wa || '',
     };
   }
   async listUsers() {
@@ -1090,6 +1098,7 @@ function openMenu() {
     ONLINE && S.admin && ['users', `👥 Pengguna${S.pendingUsers ? ` (${S.pendingUsers} menunggu)` : ''}`],
     S.admin && ['paroki-settings', '⛪ Pengaturan paroki (nama, jam misa)'],
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
+    ONLINE && ['profile', '👤 Profil saya'],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
   const body = `<div class="menu-list">${items.map(([k, l]) => `<button type="button" data-sh="menu" data-k="${k}">${h(l)}</button>`).join('')}</div>
@@ -1103,6 +1112,7 @@ function openMenu() {
 async function menuAction(k) {
   if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users', 'paroki-settings'].includes(k)) return;
   if (k === 'users') return run(openUsers);
+  if (k === 'profile') return openProfile();
   if (k === 'paroki-settings') return openParokiForm(P);
   if (k === 'paroki') return S.super && run(openMasterParoki);
   if (k === 'new-month') openNewMonth();
@@ -1335,6 +1345,46 @@ async function openUsers() {
   })));
 }
 
+/* ---- Profil saya ---- */
+function openProfile() {
+  const me = S.me || {};
+  const role = S.super ? 'Super admin' : S.admin ? `Admin ${P.nama}` : me.status === 'approved' ? 'Petugas (lihat saja)' : 'Menunggu persetujuan';
+  const body = `
+    <div class="profile-info">
+      <div><span class="hint">Email</span><b>${h(me.email || '')}</b></div>
+      <div><span class="hint">Paroki</span><b>${h(P.nama)}</b></div>
+      <div><span class="hint">Peran</span><b>${h(role)}</b></div>
+      <div><span class="hint">Nama di jadwal</span><b>${h(me.petugas || '— belum ditautkan admin —')}</b></div>
+    </div>
+    <label class="fld">Nama lengkap<input name="nama" required value="${h(me.nama || '')}" autocomplete="name"></label>
+    <label class="fld">No. WA<input name="wa" type="tel" inputmode="tel" value="${h(me.wa || '')}" placeholder="08xxxxxxxxxx" autocomplete="tel"></label>
+    <div class="fld">Ganti password <span class="hint">(kosongkan bila tidak diganti)</span></div>
+    <div class="grid2">
+      <label class="fld">Password baru<input name="pw1" type="password" minlength="6" autocomplete="new-password"></label>
+      <label class="fld">Ulangi password<input name="pw2" type="password" minlength="6" autocomplete="new-password"></label>
+    </div>
+    <p class="hint">Email, paroki, peran, dan nama di jadwal diatur admin.${me.petugas ? ' No. WA ikut diperbarui di Master petugas.' : ''}</p>`;
+  openSheet('Profil saya', body, {
+    save: async fd => {
+      const nama = fd.get('nama').trim(), waIn = fd.get('wa').trim(), pw1 = fd.get('pw1'), pw2 = fd.get('pw2');
+      const wa = waIn ? normWa(waIn) : '';
+      if (!nama) throw new Error('Nama wajib diisi');
+      if (waIn && !wa) throw new Error('No. WA tidak valid. Contoh: 081234567890');
+      if (pw1 || pw2) {
+        if (pw1.length < 6) throw new Error('Password minimal 6 karakter');
+        if (pw1 !== pw2) throw new Error('Ulangi password tidak sama');
+      }
+      await store.updateMyProfile(nama, wa);
+      if (pw1) await store.changePassword(pw1);
+      S.me = { ...me, nama, wa };
+      const pt = me.petugas && inMaster(me.petugas);
+      if (pt && wa) setPetugas([...S.petugas.filter(x => x.id !== pt.id), { ...pt, telp: wa }]);
+      render();
+      toast(pw1 ? 'Profil & password tersimpan' : 'Profil tersimpan');
+    },
+  });
+}
+
 /* ---- Paroki ---- */
 const HARI = { minggu: 0, senin: 1, selasa: 2, rabu: 3, kamis: 4, jumat: 5, "jum'at": 5, sabtu: 6 };
 const slotsToText = p => (p.misa_slots || []).map(x => `${x.key} | ${DAYS[x.day]} | ${x.time}`).join('\n');
@@ -1530,6 +1580,7 @@ async function boot() {
   $('#loginForm').addEventListener('submit', onAuthSubmit);
   $('#authToggle').addEventListener('click', () => setAuthMode(authMode === 'login' ? 'signup' : 'login'));
   $('#pendingRetry').addEventListener('click', () => run(showApp));
+  $('#pendingProfile').addEventListener('click', openProfile);
   $('#pendingLogout').addEventListener('click', async () => { await store.sb.auth.signOut(); location.reload(); });
   const { data } = await store.sb.auth.getSession();
   if (data.session) return run(showApp);

@@ -190,6 +190,23 @@ grant execute on function public.is_super() to authenticated;
 grant execute on function public.is_admin_of(uuid) to authenticated;
 grant execute on function public.is_member_of(uuid) to authenticated;
 
+-- Profil sendiri: pengguna hanya boleh mengubah nama & No. WA miliknya (bukan status/peran/paroki).
+-- Bila akun tertaut ke Master petugas, No. WA ikut diperbarui di sana.
+create or replace function public.update_my_profile(p_nama text, p_wa text) returns void
+language plpgsql security definer set search_path = public as $$
+declare u public.app_users;
+begin
+  if coalesce(trim(p_nama), '') = '' then raise exception 'Nama wajib diisi'; end if;
+  update public.app_users set nama = left(trim(p_nama), 100), wa = left(coalesce(trim(p_wa), ''), 20)
+  where user_id = auth.uid() returning * into u;
+  if not found then raise exception 'Profil tidak ditemukan'; end if;
+  if u.petugas <> '' and u.wa <> '' then
+    update public.petugas set telp = u.wa where paroki_id = u.paroki_id and lower(nama) = lower(u.petugas);
+  end if;
+end $$;
+revoke all on function public.update_my_profile(text, text) from public, anon;
+grant execute on function public.update_my_profile(text, text) to authenticated;
+
 /* ================= Akun baru → app_users ================= */
 -- Paroki diambil dari slug yang dikirim app saat daftar (metadata 'paroki')
 create or replace function public.handle_new_user() returns trigger

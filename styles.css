@@ -216,3 +216,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .brand { max-width: 900px; margin: 0 auto; font-size: .78rem; font-weight: 600; letter-spacing: .02em; opacity: .85; }
 .login-card .sub-title { margin: -6px 0 4px; color: var(--muted); font-size: .9rem; }
 .login-card select { padding: 10px; border: 1px solid var(--line); border-radius: 8px; font-size: 1rem; background: #fff; }
+/* Profil */
+.profile-info { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px 12px; background: #f6f9f7; border: 1px solid var(--line); border-radius: 8px; }
+.profile-info > div { display: flex; flex-direction: column; min-width: 0; }
+.profile-info b { font-size: .9rem; overflow-wrap: anywhere; }
