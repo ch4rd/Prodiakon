@@ -63,9 +63,9 @@ drop trigger if exists umat_touch on public.umat;
 create trigger umat_touch before update on public.umat for each row execute function public.touch_updated_at();
 
 -- Keamanan:
---  * Semua user yang login boleh MELIHAT data.
---  * Hanya user yang terdaftar di tabel admins yang boleh MENGUBAH (tambah/ubah/hapus).
--- User dibuat manual di Authentication > Users, dan matikan "Allow new users to sign up".
+--  * Orang bisa DAFTAR sendiri dari app → status 'pending' di tabel app_users.
+--  * Hanya user yang DISETUJUI admin (status 'approved') yang boleh MELIHAT data.
+--  * Hanya user di tabel admins yang boleh MENGUBAH data dan menyetujui pendaftar.
 create table if not exists public.admins (
   user_id    uuid primary key references auth.users(id) on delete cascade,
   email      text not null default '',
@@ -81,6 +81,51 @@ $$;
 revoke all on function public.is_admin() from public, anon;
 grant execute on function public.is_admin() to authenticated;
 
+-- Pengguna app + status persetujuan
+create table if not exists public.app_users (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  email      text not null default '',
+  nama       text not null default '',
+  status     text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  created_at timestamptz not null default now()
+);
+alter table public.app_users enable row level security;
+
+-- Setiap akun baru (daftar dari app atau dibuat di dashboard) otomatis masuk app_users sebagai 'pending'
+create or replace function public.handle_new_user() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.app_users (user_id, email, nama)
+  values (new.id, coalesce(new.email, ''), coalesce(new.raw_user_meta_data ->> 'nama', ''))
+  on conflict (user_id) do nothing;
+  return new;
+end $$;
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert on auth.users for each row execute function public.handle_new_user();
+
+-- Akun yang sudah ada sebelum fitur daftar dianggap sudah disetujui
+insert into public.app_users (user_id, email, status)
+select id, coalesce(email, ''), 'approved' from auth.users
+on conflict (user_id) do nothing;
+
+create or replace function public.is_approved() returns boolean
+language sql stable security definer set search_path = public as $$
+  select public.is_admin()
+      or exists (select 1 from public.app_users where user_id = auth.uid() and status = 'approved');
+$$;
+revoke all on function public.is_approved() from public, anon;
+grant execute on function public.is_approved() to authenticated;
+
+drop policy if exists app_users_select on public.app_users;
+create policy app_users_select on public.app_users for select to authenticated
+  using (user_id = auth.uid() or public.is_admin());
+drop policy if exists app_users_update on public.app_users;
+create policy app_users_update on public.app_users for update to authenticated
+  using (public.is_admin()) with check (public.is_admin());
+drop policy if exists app_users_delete on public.app_users;
+create policy app_users_delete on public.app_users for delete to authenticated
+  using (public.is_admin());
+
 alter table public.months     enable row level security;
 alter table public.misa       enable row level security;
 alter table public.smk_groups enable row level security;
@@ -93,7 +138,7 @@ begin
     execute format('drop policy if exists %I on public.%I', t || '_auth', t);
     execute format('drop policy if exists %I on public.%I', t || '_read', t);
     execute format('drop policy if exists %I on public.%I', t || '_write', t);
-    execute format('create policy %I on public.%I for select to authenticated using (true)', t || '_read', t);
+    execute format('create policy %I on public.%I for select to authenticated using (public.is_approved())', t || '_read', t);
     execute format('create policy %I on public.%I for all to authenticated using (public.is_admin()) with check (public.is_admin())', t || '_write', t);
   end loop;
 end $$;

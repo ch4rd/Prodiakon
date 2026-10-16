@@ -16,11 +16,21 @@
     <form id="loginForm" class="login-card">
       <img src="icons/icon.svg" alt="" width="64" height="64">
       <h1>Jadwal Prodiakon</h1>
+      <p class="hint" id="authHint" hidden></p>
+      <label id="namaFld" hidden>Nama lengkap<input name="nama" autocomplete="name"></label>
       <label>Email<input type="email" name="email" autocomplete="username" required></label>
-      <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
-      <button class="btn primary" type="submit">Masuk</button>
+      <label>Password<input type="password" name="password" autocomplete="current-password" required minlength="6"></label>
+      <button class="btn primary" type="submit" id="authBtn">Masuk</button>
       <p class="err" id="loginErr"></p>
+      <button type="button" class="link-btn" id="authToggle">Belum punya akun? Daftar</button>
     </form>
+    <div id="pending" class="login-card" hidden>
+      <img src="icons/icon.svg" alt="" width="64" height="64">
+      <h1 id="pendingTitle">Menunggu persetujuan admin</h1>
+      <p class="hint" id="pendingText"></p>
+      <button type="button" class="btn primary" id="pendingRetry">Cek lagi</button>
+      <button type="button" class="link-btn" id="pendingLogout">Keluar</button>
+    </div>
   </div>
 
   <div id="app" hidden>

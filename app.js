@@ -138,6 +138,21 @@ class SupaStore {
     const { data, error } = await this.sb.rpc('is_admin');
     return !error && data === true;
   }
+  // Status persetujuan akun yang sedang login: pending | approved | rejected
+  async me() {
+    const { data: { user } } = await this.sb.auth.getUser();
+    const { data } = await this.sb.from('app_users').select('status, nama').eq('user_id', user.id).maybeSingle();
+    return { id: user.id, email: user.email, status: data?.status || 'pending', nama: data?.nama || '' };
+  }
+  async listUsers() {
+    const { data, error } = await this.sb.from('app_users').select('*').order('created_at');
+    if (error) throw error;
+    return data;
+  }
+  async setUserStatus(id, status) {
+    const { error } = await this.sb.from('app_users').update({ status }).eq('user_id', id);
+    if (error) throw error;
+  }
 }
 
 /* ================= State ================= */
@@ -148,6 +163,7 @@ const S = {
   misaFilter: 'ALL', smkQ: '', personQ: '', person: null,
   admin: true, // false = hanya bisa melihat (bukan admin)
   umat: [], smkView: lsGet('prodiakon.smkView') || 'grup', umatQ: '',
+  userId: null, pendingUsers: 0,
 };
 // Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
 let UM = new Map();
@@ -891,6 +907,7 @@ function openMenu() {
     ['backup', '💾 Backup semua data (JSON)'],
     S.admin && ['import', '📥 Import dari backup JSON'],
     S.admin && window.SEED && !hasSeed && ['load-seed', '🧾 Muat data Oktober 2026'],
+    ONLINE && S.admin && ['users', `👥 Pengguna${S.pendingUsers ? ` (${S.pendingUsers} menunggu)` : ''}`],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
   const body = `<div class="menu-list">${items.map(([k, l]) => `<button type="button" data-sh="menu" data-k="${k}">${h(l)}</button>`).join('')}</div>
@@ -901,7 +918,8 @@ function openMenu() {
 }
 
 async function menuAction(k) {
-  if (!S.admin && ['new-month', 'settings', 'import', 'load-seed'].includes(k)) return;
+  if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users'].includes(k)) return;
+  if (k === 'users') return run(openUsers);
   if (k === 'new-month') openNewMonth();
   else if (k === 'settings') openMonthSettings();
   else if (k === 'print') printView();
@@ -1041,30 +1059,114 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden && ONLINE && !dlg.open && !$('#app').hidden) run(loadMonth);
 });
 
+/* ---- Pengguna (persetujuan pendaftar) ---- */
+async function openUsers() {
+  const list = await store.listUsers();
+  S.pendingUsers = list.filter(u => u.status === 'pending').length;
+  const row = u => {
+    const btns = u.user_id === S.userId ? '<span class="tag">Anda</span>' : [
+      u.status !== 'approved' && `<button type="button" class="btn small primary" data-sh="u-approved" data-id="${h(u.user_id)}">Setujui</button>`,
+      u.status !== 'rejected' && `<button type="button" class="btn small" data-sh="u-rejected" data-id="${h(u.user_id)}">${u.status === 'approved' ? 'Cabut' : 'Tolak'}</button>`,
+    ].filter(Boolean).join('');
+    return `<div class="urow"><div class="mi"><span class="nm">${h(u.nama || '(tanpa nama)')}</span>
+      <div class="ad">${h(u.email)} · daftar ${h(fmtShort(u.created_at.slice(0, 10)))}</div></div>${btns}</div>`;
+  };
+  const sec = (st, title) => {
+    const l = list.filter(u => u.status === st);
+    return l.length ? `<div class="sec-title">${title} <span class="count">${l.length}</span></div><div class="list">${l.map(row).join('')}</div>` : '';
+  };
+  const body = (sec('pending', 'Menunggu persetujuan') + sec('approved', 'Disetujui') + sec('rejected', 'Ditolak / dicabut')
+    || '<div class="empty-state">Belum ada pengguna.</div>')
+    + '<p class="hint">Yang disetujui bisa melihat jadwal & alamat umat (tanpa bisa mengubah). Hak admin diatur di Supabase SQL Editor (tabel admins).</p>';
+  openSheet('Pengguna', body, {
+    onClick: async b => {
+      const st = { 'u-approved': 'approved', 'u-rejected': 'rejected' }[b.dataset.sh];
+      if (!st) return;
+      if (st === 'rejected' && !confirm('Tolak / cabut akses pengguna ini?')) return;
+      if ((await run(() => store.setUserStatus(b.dataset.id, st))) === false) return;
+      toast(st === 'approved' ? 'Disetujui' : 'Akses dicabut');
+      dlg.close(); await run(openUsers);
+    },
+  });
+}
+
 /* ================= Boot ================= */
+let authMode = 'login';
+function setAuthMode(mode, hint = '') {
+  authMode = mode;
+  const su = mode === 'signup', f = $('#loginForm');
+  $('#namaFld').hidden = !su; f.elements.nama.required = su;
+  f.elements.password.autocomplete = su ? 'new-password' : 'current-password';
+  $('#authBtn').textContent = su ? 'Daftar' : 'Masuk';
+  $('#authToggle').textContent = su ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar';
+  hint = hint || (su ? 'Setelah mendaftar, akun perlu disetujui admin dulu sebelum bisa melihat jadwal.' : '');
+  $('#authHint').textContent = hint; $('#authHint').hidden = !hint;
+  $('#loginErr').textContent = '';
+}
+function showLogin() {
+  $('#app').hidden = true; $('#login').hidden = false; $('#loginForm').hidden = false; $('#pending').hidden = true;
+}
+function showPending(me) {
+  $('#app').hidden = true; $('#login').hidden = false; $('#loginForm').hidden = true; $('#pending').hidden = false;
+  const rej = me.status === 'rejected';
+  $('#pendingTitle').textContent = rej ? 'Pendaftaran tidak disetujui' : 'Menunggu persetujuan admin';
+  $('#pendingText').textContent = rej
+    ? `Akun ${me.email} tidak disetujui. Hubungi admin bila ini keliru.`
+    : `Akun ${me.email} sudah terdaftar. Admin perlu menyetujuinya dulu sebelum Anda bisa melihat jadwal. Tekan "Cek lagi" setelah disetujui.`;
+}
 async function showApp() {
-  $('#login').hidden = true; $('#app').hidden = false;
   if (ONLINE) {
+    const me = await store.me();
+    S.userId = me.id;
     S.admin = await store.isAdmin();
+    if (!S.admin && me.status !== 'approved') return showPending(me);
     $('#modeBadge').textContent = S.admin ? 'Admin' : 'Lihat saja';
   }
+  $('#login').hidden = true; $('#app').hidden = false;
   await run(loadMonths);
+  if (ONLINE && S.admin) {
+    const users = await store.listUsers().catch(() => []);
+    S.pendingUsers = users.filter(u => u.status === 'pending').length;
+    if (S.pendingUsers) toast(`${S.pendingUsers} pendaftar menunggu persetujuan (Menu ⋮ → Pengguna)`);
+  }
+}
+async function onAuthSubmit(e) {
+  e.preventDefault();
+  const fd = new FormData(e.target), email = fd.get('email').trim(), password = fd.get('password');
+  const err = $('#loginErr'), btn = $('#authBtn');
+  err.textContent = ''; btn.disabled = true;
+  try {
+    if (authMode === 'signup') {
+      const { data, error } = await store.sb.auth.signUp({
+        email, password,
+        options: { data: { nama: fd.get('nama').trim() }, emailRedirectTo: location.origin + location.pathname },
+      });
+      if (error) {
+        err.textContent = /not allowed|disabled/i.test(error.message) ? 'Pendaftaran sedang ditutup. Hubungi admin.' : 'Daftar gagal: ' + error.message;
+        return;
+      }
+      if (data.session) return await showApp(); // konfirmasi email dimatikan → langsung ke layar menunggu persetujuan
+      setAuthMode('login', `Pendaftaran terkirim. Buka email ${email}, klik link konfirmasinya, lalu masuk di sini. Setelah itu tunggu persetujuan admin.`);
+      return;
+    }
+    const { error } = await store.sb.auth.signInWithPassword({ email, password });
+    if (error) err.textContent = 'Login gagal: ' + (/confirm/i.test(error.message) ? 'email belum dikonfirmasi, cek kotak masuk email.' : error.message);
+    else await showApp();
+  } catch (ex) {
+    err.textContent = 'Gagal: ' + (ex.message || ex);
+  } finally { btn.disabled = false; }
 }
 async function boot() {
   store = ONLINE ? new SupaStore() : new LocalStore();
   $('#modeBadge').textContent = ONLINE ? 'Online' : 'Lokal';
   if (!ONLINE) return showApp();
+  $('#loginForm').addEventListener('submit', onAuthSubmit);
+  $('#authToggle').addEventListener('click', () => setAuthMode(authMode === 'login' ? 'signup' : 'login'));
+  $('#pendingRetry').addEventListener('click', () => run(showApp));
+  $('#pendingLogout').addEventListener('click', async () => { await store.sb.auth.signOut(); location.reload(); });
   const { data } = await store.sb.auth.getSession();
-  if (data.session) return showApp();
-  $('#login').hidden = false;
-  $('#loginForm').addEventListener('submit', async e => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    $('#loginErr').textContent = '';
-    const { error } = await store.sb.auth.signInWithPassword({ email: fd.get('email'), password: fd.get('password') });
-    if (error) $('#loginErr').textContent = 'Login gagal: ' + error.message;
-    else showApp();
-  });
+  if (data.session) return run(showApp);
+  setAuthMode('login'); showLogin();
 }
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});

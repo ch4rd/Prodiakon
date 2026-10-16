@@ -192,3 +192,12 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 /* Alamat kunjungan SMK di tugas petugas */
 .visit { margin-top: 6px; padding: 8px 10px; border-radius: 8px; background: #f6f9f7; border: 1px solid var(--line); }
 .visit .member .ad .map { margin-left: 6px; font-size: .78rem; font-weight: 600; }
+/* Daftar & persetujuan */
+.link-btn { border: 0; background: none; color: var(--brand-2); font-weight: 600; font-size: .9rem; padding: 6px; cursor: pointer; }
+.login-card .hint { margin: 0; text-align: left; line-height: 1.4; }
+.urow { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); }
+.urow:first-child { border-top: 0; }
+.urow .mi { flex: 1; min-width: 0; }
+.urow .nm { font-weight: 600; }
+.urow .ad { font-size: .8rem; color: var(--muted); overflow-wrap: anywhere; }
+.sh-body > * { flex-shrink: 0; }
