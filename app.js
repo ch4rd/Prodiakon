@@ -1219,9 +1219,10 @@ document.addEventListener('visibilitychange', () => {
 });
 
 /* ---- Pengguna (persetujuan pendaftar) ---- */
-// Pendaftar disetujui → nama (dan No. WA) masuk Master petugas, akun ditautkan ke nama itu (tab Saya)
-async function approveToMaster(u) {
-  const nama = String(u?.nama || '').trim().replace(/\s+/g, ' ');
+// Pendaftar disetujui → akun ditautkan (bind) ke petugas di master (tab Saya).
+// bound = nama yang dipilih admin; bila kosong, nama pendaftar (+ No. WA) ditambahkan ke Master petugas.
+async function approveToMaster(u, bound = '') {
+  const nama = String(bound || u?.nama || '').trim().replace(/\s+/g, ' ');
   if (!nama) return '';
   let p = inMaster(nama);
   if (!p || !p.active || (!p.telp && u.wa)) {
@@ -1229,7 +1230,7 @@ async function approveToMaster(u) {
     await store.upsert('petugas', [p]);
     setPetugas([...S.petugas.filter(x => x.id !== p.id), p]);
   }
-  if (!u.petugas) await store.setUserPetugas(u.user_id, p.nama);
+  if (norm(u.petugas) !== norm(p.nama)) await store.setUserPetugas(u.user_id, p.nama);
   return p.nama;
 }
 async function openUsers() {
@@ -1240,7 +1241,9 @@ async function openUsers() {
       u.status !== 'approved' && `<button type="button" class="btn small primary" data-sh="u-approved" data-id="${h(u.user_id)}">Setujui</button>`,
       u.status !== 'rejected' && `<button type="button" class="btn small" data-sh="u-rejected" data-id="${h(u.user_id)}">${u.status === 'approved' ? 'Cabut' : 'Tolak'}</button>`,
     ].filter(Boolean).join('');
-    const names = masterNames(), cur = names.find(x => norm(x) === norm(u.petugas)) || u.petugas || '';
+    const names = masterNames();
+    const cur = names.find(x => norm(x) === norm(u.petugas)) || u.petugas
+      || (u.status === 'pending' ? names.find(x => norm(x) === norm(u.nama)) || '' : '');
     const link = u.status === 'rejected' ? '' : `<label class="u-link">Nama di jadwal
         <select data-uid="${h(u.user_id)}">${opt('', '— belum ditautkan —', cur)}${(cur && !names.includes(cur) ? [cur] : []).concat(names).map(n => opt(n, n, cur)).join('')}</select></label>`;
     return `<div class="urow"><div class="mi"><span class="nm">${h(u.nama || '(tanpa nama)')}</span>
@@ -1253,6 +1256,7 @@ async function openUsers() {
   };
   const body = (sec('pending', 'Menunggu persetujuan') + sec('approved', 'Disetujui') + sec('rejected', 'Ditolak / dicabut')
     || '<div class="empty-state">Belum ada pengguna.</div>')
+    + '<p class="hint">Sebelum <b>Setujui</b>, pilih "Nama di jadwal" untuk menautkan ke petugas yang sudah ada. Bila dibiarkan kosong, nama pendaftar ditambahkan ke Master petugas.</p>'
     + '<p class="hint">Yang disetujui bisa melihat jadwal & alamat umat (tanpa bisa mengubah). Hak admin diatur di Supabase SQL Editor (tabel admins).</p>';
   openSheet('Pengguna', body, {
     onClick: async b => {
@@ -1262,14 +1266,16 @@ async function openUsers() {
       if ((await run(() => store.setUserStatus(b.dataset.id, st))) === false) return;
       let msg = st === 'approved' ? 'Disetujui' : 'Akses dicabut';
       if (st === 'approved') {
-        const nama = await run(() => approveToMaster(list.find(u => u.user_id === b.dataset.id)));
-        if (nama) msg += ` · ${nama} ada di Master petugas`;
+        const bound = $(`.u-link select[data-uid="${b.dataset.id}"]`)?.value || '';
+        const nama = await run(() => approveToMaster(list.find(u => u.user_id === b.dataset.id), bound));
+        if (nama) msg += ` · ditautkan ke ${nama}`;
       }
       toast(msg);
       dlg.close(); await run(openUsers);
     },
   });
   $$('.u-link select').forEach(sel => sel.addEventListener('change', () => run(async () => {
+    if (list.find(u => u.user_id === sel.dataset.uid)?.status === 'pending') return; // dipakai saat Setujui
     await store.setUserPetugas(sel.dataset.uid, sel.value);
     if (sel.dataset.uid === S.userId) S.me.petugas = sel.value;
     toast(sel.value ? `Ditautkan ke ${sel.value}` : 'Tautan dihapus');
