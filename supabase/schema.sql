@@ -47,15 +47,44 @@ create trigger misa_touch before update on public.misa for each row execute func
 drop trigger if exists smk_groups_touch on public.smk_groups;
 create trigger smk_groups_touch before update on public.smk_groups for each row execute function public.touch_updated_at();
 
--- Keamanan: hanya user yang sudah login yang bisa baca/tulis.
+-- Keamanan:
+--  * Semua user yang login boleh MELIHAT data.
+--  * Hanya user yang terdaftar di tabel admins yang boleh MENGUBAH (tambah/ubah/hapus).
 -- User dibuat manual di Authentication > Users, dan matikan "Allow new users to sign up".
+create table if not exists public.admins (
+  user_id    uuid primary key references auth.users(id) on delete cascade,
+  email      text not null default '',
+  created_at timestamptz not null default now()
+);
+alter table public.admins enable row level security;
+-- (sengaja tanpa policy: tabel admins hanya diubah dari SQL Editor / dashboard)
+
+create or replace function public.is_admin() returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (select 1 from public.admins where user_id = auth.uid());
+$$;
+revoke all on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;
+
 alter table public.months     enable row level security;
 alter table public.misa       enable row level security;
 alter table public.smk_groups enable row level security;
 
-drop policy if exists months_auth on public.months;
-create policy months_auth on public.months for all to authenticated using (true) with check (true);
-drop policy if exists misa_auth on public.misa;
-create policy misa_auth on public.misa for all to authenticated using (true) with check (true);
-drop policy if exists smk_groups_auth on public.smk_groups;
-create policy smk_groups_auth on public.smk_groups for all to authenticated using (true) with check (true);
+do $$
+declare t text;
+begin
+  foreach t in array array['months', 'misa', 'smk_groups'] loop
+    execute format('drop policy if exists %I on public.%I', t || '_auth', t);
+    execute format('drop policy if exists %I on public.%I', t || '_read', t);
+    execute format('drop policy if exists %I on public.%I', t || '_write', t);
+    execute format('create policy %I on public.%I for select to authenticated using (true)', t || '_read', t);
+    execute format('create policy %I on public.%I for all to authenticated using (public.is_admin()) with check (public.is_admin())', t || '_write', t);
+  end loop;
+end $$;
+
+-- Menjadikan user sebagai admin (ganti emailnya, jalankan di SQL Editor):
+--   insert into public.admins (user_id, email)
+--   select id, email from auth.users where email = 'nama@contoh.com'
+--   on conflict do nothing;
+-- Mencabut admin:
+--   delete from public.admins where email = 'nama@contoh.com';

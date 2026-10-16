@@ -134,6 +134,10 @@ class SupaStore {
     const { error } = await this.sb.from(kind).delete().eq('id', id);
     if (error) throw error;
   }
+  async isAdmin() {
+    const { data, error } = await this.sb.rpc('is_admin');
+    return !error && data === true;
+  }
 }
 
 /* ================= State ================= */
@@ -142,6 +146,7 @@ const S = {
   months: [], monthId: null, misa: [], smk: [],
   tab: lsGet('prodiakon.tab') || 'misa',
   misaFilter: 'ALL', smkQ: '', personQ: '', person: null,
+  admin: true, // false = hanya bisa melihat (bukan admin)
 };
 const curMonth = () => S.months.find(m => m.id === S.monthId);
 const weeks = () => (curMonth()?.weeks || []);
@@ -176,7 +181,7 @@ function render() {
     ? S.months.map(m => `<option value="${h(m.id)}" ${m.id === S.monthId ? 'selected' : ''}>${h(monthName(m.id))}</option>`).join('')
     : '<option>Belum ada data</option>';
   $$('.tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
-  $('#fab').hidden = !S.monthId || !['misa', 'smk'].includes(S.tab);
+  $('#fab').hidden = !S.admin || !S.monthId || !['misa', 'smk'].includes(S.tab);
   $('#names').innerHTML = allNames().map(n => `<option value="${h(n)}">`).join('');
   const n = buildIssues().length;
   $('#cekCount').textContent = n ? String(n) : '';
@@ -190,6 +195,7 @@ function render() {
 }
 
 function emptyState() {
+  if (!S.admin) return `<div class="empty-state"><p>Belum ada jadwal. Hubungi admin.</p></div>`;
   return `<div class="empty-state">
     <p>Belum ada data bulan apa pun.</p>
     <div class="btns" style="justify-content:center">
@@ -233,7 +239,7 @@ function misaCard(m, highlight) {
     return `<span class="${cls}">${norm(n) === koor ? '★ ' : ''}${h(n)}</span>`;
   }).join('') + '<span class="chip empty">kosong</span>'.repeat(empty);
   const sub = [m.time && `pk ${m.time}`, m.place].filter(Boolean).join(' · ');
-  return `<article class="card tap" data-act="edit-misa" data-id="${h(m.id)}">
+  return `<article class="card${S.admin ? ' tap' : ''}" ${S.admin ? `data-act="edit-misa" data-id="${h(m.id)}"` : ''}>
     <div class="c-head" style="border-left:6px solid ${col[1]}">
       <span class="badge">${m.slot === 'LAIN' ? 'Khusus' : h(m.slot)}</span>
       <span class="t">${h(m.title || slotLabel(m.slot))}</span>
@@ -289,7 +295,7 @@ function smkCard(g) {
     <div class="c-head">
       <span class="badge">${h(g.no)}</span>
       <span class="sub">${g.members.length} umat</span>
-      <button class="btn small" style="margin-left:auto" data-act="edit-smk" data-id="${h(g.id)}">Ubah</button>
+      ${S.admin ? `<button class="btn small" style="margin-left:auto" data-act="edit-smk" data-id="${h(g.id)}">Ubah</button>` : ''}
     </div>
     <div class="c-body"><div class="weeks">${wk}</div>${mem || '<span class="count">Belum ada umat</span>'}</div>
   </article>`;
@@ -675,23 +681,24 @@ function openMonthSettings() {
 function openMenu() {
   const hasSeed = S.months.some(m => m.id === window.SEED?.months[0].id);
   const items = [
-    ['new-month', '📅 Buat bulan baru'],
-    S.monthId && ['settings', '⚙️ Pengaturan bulan ini (label minggu, catatan)'],
+    S.admin && ['new-month', '📅 Buat bulan baru'],
+    S.admin && S.monthId && ['settings', '⚙️ Pengaturan bulan ini (label minggu, catatan)'],
     S.monthId && ['print', '🖨️ Cetak jadwal ' + (S.tab === 'smk' ? 'SMK' : 'misa')],
     S.monthId && ['csv', '📄 Export daftar SMK (CSV/Excel)'],
     ['backup', '💾 Backup semua data (JSON)'],
-    ['import', '📥 Import dari backup JSON'],
-    window.SEED && !hasSeed && ['load-seed', '🧾 Muat data Oktober 2026'],
+    S.admin && ['import', '📥 Import dari backup JSON'],
+    S.admin && window.SEED && !hasSeed && ['load-seed', '🧾 Muat data Oktober 2026'],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
   const body = `<div class="menu-list">${items.map(([k, l]) => `<button type="button" data-sh="menu" data-k="${k}">${h(l)}</button>`).join('')}</div>
-    <p class="hint">Mode: ${ONLINE ? 'Online (Supabase)' : 'Lokal – data hanya di perangkat ini. Isi config.js untuk menyambung ke Supabase.'}</p>`;
+    <p class="hint">Mode: ${ONLINE ? `Online (Supabase) · ${S.admin ? 'Admin – bisa mengubah' : 'Lihat saja – hanya admin yang bisa mengubah'}` : 'Lokal – data hanya di perangkat ini. Isi config.js untuk menyambung ke Supabase.'}</p>`;
   openSheet('Menu', body, {
     onClick: (b) => { dlg.close(); menuAction(b.dataset.k); },
   });
 }
 
 async function menuAction(k) {
+  if (!S.admin && ['new-month', 'settings', 'import', 'load-seed'].includes(k)) return;
   if (k === 'new-month') openNewMonth();
   else if (k === 'settings') openMonthSettings();
   else if (k === 'print') printView();
@@ -797,6 +804,7 @@ $('#main').addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const { act, id, k } = el.dataset;
+  if (!S.admin && ['edit-misa', 'edit-smk', 'load-seed', 'new-month'].includes(act)) return;
   if (act === 'misa-filter') { S.misaFilter = k; render(); }
   else if (act === 'edit-misa') openMisa(S.misa.find(m => m.id === id));
   else if (act === 'edit-smk') openSmk(S.smk.find(g => g.id === id));
@@ -817,7 +825,7 @@ $$('.tabs button').forEach(b => b.addEventListener('click', () => {
 }));
 $('#monthSel').addEventListener('change', e => { S.monthId = e.target.value; S.person = null; run(loadMonth); });
 $('#menuBtn').addEventListener('click', openMenu);
-$('#fab').addEventListener('click', () => (S.tab === 'smk' ? openSmk() : openMisa()));
+$('#fab').addEventListener('click', () => S.admin && (S.tab === 'smk' ? openSmk() : openMisa()));
 document.addEventListener('visibilitychange', () => {
   // ambil perubahan dari pengguna lain saat app dibuka kembali
   if (!document.hidden && ONLINE && !dlg.open && !$('#app').hidden) run(loadMonth);
@@ -826,6 +834,10 @@ document.addEventListener('visibilitychange', () => {
 /* ================= Boot ================= */
 async function showApp() {
   $('#login').hidden = true; $('#app').hidden = false;
+  if (ONLINE) {
+    S.admin = await store.isAdmin();
+    $('#modeBadge').textContent = S.admin ? 'Admin' : 'Lihat saja';
+  }
   await run(loadMonths);
 }
 async function boot() {
