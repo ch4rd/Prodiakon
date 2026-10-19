@@ -9,6 +9,7 @@ create table if not exists public.paroki (
   kota       text not null default '',
   misa_slots jsonb not null default '[]',         -- [{key, day (0=Minggu..6=Sabtu), time, label}]
   smk_extra  jsonb not null default '[]',         -- slot SMK di luar jam misa: [{key, label}]
+  logo       text not null default '',             -- gambar logo kecil (data URL, diperkecil di app)
   active     boolean not null default true,
   created_at timestamptz not null default now()
 );
@@ -21,6 +22,12 @@ insert into public.paroki (slug, nama, kota, misa_slots, smk_extra) values (
     {"key":"M4","day":0,"time":"17.30","label":"Minggu 17.30"}]',
   '[{"key":"PRIVAT","label":"Privat (petugas tetap)"},{"key":"JUMAT","label":"Jumat (Suster)"}]'
 ) on conflict (slug) do nothing;
+
+-- tabel paroki versi lama: tambah kolom logo + batas ukuran (±200 KB)
+alter table public.paroki add column if not exists logo text not null default '';
+alter table public.paroki drop constraint if exists paroki_logo_size;
+alter table public.paroki add constraint paroki_logo_size
+  check (logo = '' or (logo like 'data:image/%' and length(logo) <= 200000));
 
 /* ================= Data jadwal ================= */
 create table if not exists public.months (

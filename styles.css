@@ -228,3 +228,12 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .push-box { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .push-box > div { flex: 1; min-width: 0; }
 .push-cta { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 10px 12px; margin-bottom: 10px; border-radius: var(--radius); background: #fff7e0; border: 1px solid #f1d58a; font-size: .9rem; }
+/* Logo paroki */
+.paroki-logo { object-fit: contain; border-radius: 12px; }
+.brand { display: flex; align-items: center; gap: 6px; }
+.brand .paroki-logo { border-radius: 4px; background: #fff; }
+.logo-edit { display: flex; gap: 12px; align-items: center; }
+.logo-edit img { width: 72px; height: 72px; object-fit: contain; border: 1px solid var(--line); border-radius: 12px; background: #fff; flex: none; }
+.logo-btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.logo-btns .fld, .logo-btns .hint { width: 100%; }
+.p-thumb { width: 36px; height: 36px; object-fit: contain; border-radius: 8px; border: 1px solid var(--line); background: #fff; flex: none; }

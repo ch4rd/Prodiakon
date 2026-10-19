@@ -24,6 +24,7 @@ function applyParoki(p) {
   MISA_SLOTS = [...reg.map(x => ({ ...x, label: `${DAYS[x.day] ?? ''} ${x.time}`.trim() })), { key: 'LAIN', label: 'Misa lainnya', time: '' }];
   SMK_SLOTS = [...reg.map(x => ({ key: x.key, label: `${DAYS[x.day] ?? ''}, pk ${x.time}` })), ...(p.smk_extra || [])];
   document.title = `Prodiakon ${p.nama}`;
+  $$('.paroki-logo').forEach(img => { img.src = p.logo || 'icons/icon.svg'; });
   $$('.paroki-name').forEach(el => { el.textContent = p.nama; });
 }
 // Tanggal misa rutin pada akhir pekan tsb: Minggu = hari Minggu, Sabtu = sehari sebelumnya, dst.
@@ -1546,8 +1547,18 @@ const parokiLink = p => `${location.origin}${location.pathname}?p=${encodeURICom
 // Tambah / ubah paroki. Admin paroki mengubah parokinya; slug & aktif hanya super admin.
 function openParokiForm(p) {
   const isNew = !p;
-  p = p ? structuredClone(p) : { slug: '', nama: '', kota: '', misa_slots: DEFAULT_PAROKI.misa_slots, smk_extra: [], active: true };
+  p = p ? structuredClone(p) : { slug: '', nama: '', kota: '', logo: '', misa_slots: DEFAULT_PAROKI.misa_slots, smk_extra: [], active: true };
+  let logo = p.logo || '';
   const body = `
+    <div class="logo-edit">
+      <img id="logoPrev" src="${h(logo || 'icons/icon.svg')}" alt="Logo paroki" width="72" height="72">
+      <div class="logo-btns">
+        <div class="fld">Logo / gambar paroki</div>
+        <label class="btn small">Pilih gambar…<input type="file" id="logoFile" accept="image/*" hidden></label>
+        <button type="button" class="btn small" data-sh="logo-clear">Pakai ikon bawaan</button>
+        <div class="hint">Otomatis diperkecil (maks. 256 px). Tampil di halaman login & header.</div>
+      </div>
+    </div>
     <label class="fld">Nama paroki (tampil sebagai "Prodiakon …")<input name="nama" required value="${h(p.nama)}" placeholder="St. Albertus"></label>
     <label class="fld">Kota / lokasi<input name="kota" value="${h(p.kota)}" placeholder="Harapan Indah, Bekasi"></label>
     ${S.super ? `<label class="fld">Kode link (huruf kecil, angka, tanda -)<input name="slug" required value="${h(p.slug)}" placeholder="albertus" pattern="[a-z0-9\\-]+"></label>
@@ -1562,7 +1573,7 @@ function openParokiForm(p) {
         ...(p.id ? { id: p.id } : {}), nama: fd.get('nama').trim(), kota: fd.get('kota').trim(),
         slug: S.super ? fd.get('slug').trim().toLowerCase() : p.slug,
         active: S.super ? !!fd.get('active') : p.active,
-        misa_slots: parseSlots(fd.get('slots')), smk_extra: parseExtra(fd.get('extra')),
+        misa_slots: parseSlots(fd.get('slots')), smk_extra: parseExtra(fd.get('extra')), logo,
       };
       if (!row.nama) throw new Error('Nama paroki wajib diisi');
       if (!/^[a-z0-9-]+$/.test(row.slug)) throw new Error('Kode link hanya huruf kecil, angka, dan tanda -');
@@ -1572,12 +1583,37 @@ function openParokiForm(p) {
       if (saved.id === P.id) { applyParoki(saved); render(); }
       toast(isNew ? `Paroki ${saved.nama} dibuat` : 'Tersimpan');
     },
+    onClick: b => { if (b.dataset.sh === 'logo-clear') { logo = ''; $('#logoPrev').src = 'icons/icon.svg'; } },
   });
+  $('#logoFile').addEventListener('change', e => run(async () => {
+    const file = e.target.files[0];
+    if (!file) return;
+    logo = await shrinkImage(file, 256);
+    $('#logoPrev').src = logo;
+    toast(`Logo siap (${Math.round(logo.length / 1024)} KB) — tekan Simpan`);
+  }));
+}
+
+// Perkecil gambar di browser (sisi terpanjang ≤ max px) → data URL WebP (cadangan PNG), agar ringan disimpan
+async function shrinkImage(file, max) {
+  if (!file.type.startsWith('image/')) throw new Error('File harus berupa gambar');
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, fail) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => fail(new Error('Gambar tidak bisa dibaca')); i.src = url; });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    let out = c.toDataURL('image/webp', 0.85);
+    if (!out.startsWith('data:image/webp')) out = c.toDataURL('image/png');
+    if (out.length > 200000) throw new Error('Gambar terlalu besar setelah diperkecil, coba gambar lain');
+    return out;
+  } finally { URL.revokeObjectURL(url); }
 }
 
 async function openMasterParoki() {
   S.parokiList = await store.listParoki();
-  const rows = S.parokiList.map(p => `<div class="urow"><div class="mi">
+  const rows = S.parokiList.map(p => `<div class="urow"><img class="p-thumb" src="${h(p.logo || 'icons/icon.svg')}" alt="" width="36" height="36"><div class="mi">
       <span class="nm">${h(p.nama)}</span>${p.id === P.id ? ' <span class="tag">Sedang dibuka</span>' : ''}${p.active ? '' : ' <span class="tag warn">Nonaktif</span>'}
       <div class="ad">${h(p.kota || '')}${p.kota ? ' · ' : ''}?p=${h(p.slug)}</div></div>
       <button type="button" class="btn small" data-sh="p-link" data-id="${h(p.id)}">Salin link</button>
