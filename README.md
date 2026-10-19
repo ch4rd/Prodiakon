@@ -31,6 +31,28 @@ Satu app & satu database untuk banyak paroki; data tiap paroki terpisah (dijaga 
    `insert into public.super_admins (user_id, email) select id, email from auth.users where email = 'nama@contoh.com' on conflict do nothing;`
 6. Login → Menu ⋮ → **Master paroki** untuk menambah paroki dan membagikan linknya.
 
+## Notifikasi (Firebase Cloud Messaging) – opsional
+Pengingat tugas H-1 pukul 18.00 WIB, pendaftar baru (ke admin paroki), dan akun disetujui. Gratis.
+
+1. **Firebase** (https://console.firebase.google.com) → buat project → *Add app* → **Web**.
+   - Salin konfigurasi web (apiKey, authDomain, projectId, messagingSenderId, appId).
+   - *Project settings → Cloud Messaging → Web Push certificates → Generate key pair* → salin **VAPID key**.
+   - Isi keduanya di `config.js` bagian `FIREBASE` (aman untuk publik).
+   - *Project settings → Service accounts → Generate new private key* → file JSON **rahasia** (jangan di-commit / dibagikan).
+2. **Supabase → Database → Extensions**: aktifkan `pg_net` dan `pg_cron`.
+3. **SQL Editor**: jalankan `supabase/notifications.sql`, lalu ambil secret-nya:
+   `select value from private.settings where key = 'notify_secret';`
+4. **Edge Functions → Deploy a new function → Via Editor**: nama `notify`, paste isi
+   `supabase/functions/notify/index.ts`, deploy. Di pengaturan function, **matikan "Verify JWT"**
+   (pengamannya header `x-notify-secret`).
+5. **Edge Functions → Secrets**: tambahkan
+   - `NOTIFY_SECRET` = hasil langkah 3
+   - `FIREBASE_SERVICE_ACCOUNT` = seluruh isi file JSON service account
+   - `APP_URL` = alamat app (opsional, default `https://ch4rd.github.io/Prodiakon/`)
+6. Di app: **Menu ⋮ → Profil saya → Notifikasi → Aktifkan** (iPhone: pasang ke layar utama dulu).
+   Uji kirim: `select public.notify_call('reminder');` · cek hasil:
+   `select status_code, content from net._http_response order by id desc limit 5;`
+
 ## Deploy (gratis)
 Pilih salah satu, upload seluruh folder ini:
 - **Netlify Drop**: https://app.netlify.com/drop → seret folder.

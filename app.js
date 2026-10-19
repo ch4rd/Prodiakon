@@ -155,6 +155,14 @@ class SupaStore {
     const { error } = await this.sb.auth.updateUser({ password });
     if (error) throw error;
   }
+  async registerPushToken(token) {
+    const { error } = await this.sb.rpc('register_push_token', { p_token: token, p_ua: navigator.userAgent });
+    if (error) throw error;
+  }
+  async unregisterPushToken(token) {
+    const { error } = await this.sb.rpc('unregister_push_token', { p_token: token });
+    if (error) throw error;
+  }
   async isSuper() {
     const { data, error } = await this.sb.rpc('is_super');
     return !error && data === true;
@@ -622,7 +630,11 @@ function renderSaya(main) {
     }).join('')}</div>`;
   };
   const smk = items.filter(i => i.type === 'smk'), misa = items.filter(i => i.type === 'misa');
-  main.innerHTML = `<div class="me-head">
+  const ps = pushState();
+  const pushCta = ps === 'off' || ps === 'ios-install'
+    ? `<div class="push-cta">🔔 ${ps === 'off' ? 'Dapatkan pengingat H-1 sebelum bertugas.' : h(PUSH_TEXT['ios-install'])}
+        ${ps === 'off' ? '<button class="btn small primary" data-act="push-on">Aktifkan</button>' : ''}</div>` : '';
+  main.innerHTML = `${pushCta}<div class="me-head">
       <div><div class="hint">Jadwal saya · ${h(monthName(S.monthId))}</div><h2>${h(name)}</h2></div>
       ${nameLocked() ? '' : '<button class="link-btn" data-act="change-myname">Bukan saya?</button>'}
     </div>
@@ -1160,7 +1172,7 @@ async function menuAction(k) {
   else if (k === 'backup') run(backup);
   else if (k === 'import') $('#importFile').click();
   else if (k === 'load-seed') run(loadSeed);
-  else if (k === 'logout') { await store.sb.auth.signOut(); location.reload(); }
+  else if (k === 'logout') { await disablePush().catch(() => {}); await store.sb.auth.signOut(); location.reload(); }
 }
 
 async function importData(data, msg) {
@@ -1270,6 +1282,7 @@ $('#main').addEventListener('click', e => {
   if (!S.admin && ['edit-misa', 'edit-smk', 'edit-umat', 'edit-petugas', 'load-seed', 'new-month'].includes(act)) return;
   if (act === 'smk-view') { S.smkView = k; lsSet('prodiakon.smkView', k); render(); return; }
   if (act === 'cek-go') { if (S.admin) goIssue(k); return; }
+  if (act === 'push-on' || act === 'push-off') { togglePush(act === 'push-on'); return; }
   if (act === 'petugas-view') { S.petugasView = k; render(); return; }
   if (act === 'edit-petugas') { openPetugasForm(S.petugas.find(p => p.id === id)); return; }
   if (act === 'change-myname') { S.pickName = true; render(); $('#myNameInp')?.focus(); return; }
@@ -1384,6 +1397,84 @@ async function openUsers() {
   })));
 }
 
+/* ---- Notifikasi (Firebase Cloud Messaging) ---- */
+const FB = CFG.FIREBASE || null; // { apiKey, authDomain, projectId, messagingSenderId, appId, vapidKey }
+const FB_VER = '10.14.1';
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+// unsupported | ios-install | blocked | on | off
+function pushState() {
+  if (!ONLINE || !FB?.vapidKey || !('serviceWorker' in navigator) || !('Notification' in window)) return 'unsupported';
+  if (isIOS && !isStandalone()) return 'ios-install';
+  if (!('PushManager' in window)) return 'unsupported';
+  if (Notification.permission === 'denied') return 'blocked';
+  return Notification.permission === 'granted' && lsGet('prodiakon.pushToken') ? 'on' : 'off';
+}
+const loadScript = src => new Promise((ok, fail) => {
+  if ([...document.scripts].some(x => x.src === src)) return ok();
+  const el = document.createElement('script'); el.src = src; el.onload = ok; el.onerror = () => fail(new Error('Gagal memuat ' + src));
+  document.head.appendChild(el);
+});
+async function fbMessaging() {
+  await loadScript(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-app-compat.js`);
+  await loadScript(`https://www.gstatic.com/firebasejs/${FB_VER}/firebase-messaging-compat.js`);
+  if (!firebase.apps.length) firebase.initializeApp(FB);
+  return firebase.messaging();
+}
+async function enablePush() {
+  const st = pushState();
+  if (st === 'ios-install') throw new Error('Di iPhone: buka di Safari → Share → Add to Home Screen, lalu buka app dari ikon itu dan aktifkan notifikasi.');
+  if (st === 'blocked') throw new Error('Notifikasi diblokir. Izinkan lewat pengaturan situs di browser, lalu coba lagi.');
+  if (st === 'unsupported') throw new Error('Perangkat/browser ini belum mendukung notifikasi.');
+  if (await Notification.requestPermission() !== 'granted') throw new Error('Izin notifikasi tidak diberikan.');
+  const reg = await navigator.serviceWorker.ready;
+  const token = await (await fbMessaging()).getToken({ vapidKey: FB.vapidKey, serviceWorkerRegistration: reg });
+  if (!token) throw new Error('Gagal mendapatkan token notifikasi.');
+  await store.registerPushToken(token);
+  lsSet('prodiakon.pushToken', token);
+}
+async function disablePush() {
+  const token = lsGet('prodiakon.pushToken');
+  if (token) {
+    await store.unregisterPushToken(token).catch(() => {});
+    await (await fbMessaging()).deleteToken().catch(() => {});
+  }
+  lsSet('prodiakon.pushToken', '');
+}
+// Token bisa berubah sewaktu-waktu → segarkan diam-diam saat app dibuka (juga menautkan ke akun yang sedang login)
+async function refreshPush() {
+  if (pushState() !== 'on') return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const token = await (await fbMessaging()).getToken({ vapidKey: FB.vapidKey, serviceWorkerRegistration: reg });
+    if (token) { await store.registerPushToken(token); lsSet('prodiakon.pushToken', token); }
+  } catch (e) { console.warn('refreshPush', e); }
+}
+const PUSH_TEXT = {
+  on: '🔔 Notifikasi aktif di perangkat ini.',
+  off: 'Notifikasi belum aktif di perangkat ini.',
+  blocked: 'Notifikasi diblokir di browser. Izinkan lewat pengaturan situs.',
+  'ios-install': 'Di iPhone, notifikasi hanya bisa setelah app dipasang: Safari → Share → Add to Home Screen.',
+  unsupported: 'Perangkat/browser ini belum mendukung notifikasi.',
+};
+function pushBlock() {
+  const st = pushState();
+  if (!FB) return '';
+  return `<div class="push-box" id="pushBox">
+    <div><b>Notifikasi</b><div class="hint">${h(PUSH_TEXT[st])}</div>
+      <div class="hint">Pengingat tugas H-1 pukul 18.00${S.admin ? ', pendaftar baru' : ''}, dan persetujuan akun.</div></div>
+    ${st === 'on' ? '<button type="button" class="btn small" data-sh="push-off" data-act="push-off">Matikan</button>'
+      : st === 'off' ? '<button type="button" class="btn small primary" data-sh="push-on" data-act="push-on">Aktifkan</button>' : ''}
+  </div>`;
+}
+async function togglePush(on) {
+  const ok = await run(async () => { await (on ? enablePush() : disablePush()); });
+  if (ok === false) return;
+  toast(on ? 'Notifikasi aktif' : 'Notifikasi dimatikan');
+  const box = $('#pushBox'); if (box) box.outerHTML = pushBlock();
+  if (S.tab === 'saya' && !dlg.open) render();
+}
+
 /* ---- Profil saya ---- */
 function openProfile() {
   const me = S.me || {};
@@ -1402,8 +1493,10 @@ function openProfile() {
       <label class="fld">Password baru<input name="pw1" type="password" minlength="6" autocomplete="new-password"></label>
       <label class="fld">Ulangi password<input name="pw2" type="password" minlength="6" autocomplete="new-password"></label>
     </div>
-    <p class="hint">Email, paroki, peran, dan nama di jadwal diatur admin.${me.petugas ? ' No. WA ikut diperbarui di Master petugas.' : ''}</p>`;
+    <p class="hint">Email, paroki, peran, dan nama di jadwal diatur admin.${me.petugas ? ' No. WA ikut diperbarui di Master petugas.' : ''}</p>
+    ${pushBlock()}`;
   openSheet('Profil saya', body, {
+    onClick: b => { if (b.dataset.sh === 'push-on' || b.dataset.sh === 'push-off') togglePush(b.dataset.sh === 'push-on'); },
     save: async fd => {
       const nama = fd.get('nama').trim(), waIn = fd.get('wa').trim(), pw1 = fd.get('pw1'), pw2 = fd.get('pw2');
       const wa = waIn ? normWa(waIn) : '';
@@ -1556,6 +1649,7 @@ async function showApp() {
   }
   $('#login').hidden = true; $('#app').hidden = false;
   await run(loadMonths);
+  refreshPush();
   if (ONLINE && S.admin) {
     const users = await store.listUsers().catch(() => []);
     S.pendingUsers = users.filter(u => u.status === 'pending').length;

@@ -1,5 +1,5 @@
 // Service worker: app tetap bisa dibuka saat sinyal jelek. Naikkan VERSION setiap deploy perubahan.
-const VERSION = 'prodiakon-v16';
+const VERSION = 'prodiakon-v17';
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'config.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -23,4 +23,28 @@ self.addEventListener('fetch', e => {
     if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
     return res;
   }).catch(() => caches.match(e.request)));
+});
+
+// Push notification (FCM, pesan data: {title, body, link}) — dikirim Edge Function "notify"
+self.addEventListener('push', e => {
+  let p = {};
+  try { p = e.data ? e.data.json() : {}; } catch { p = { data: { body: e.data && e.data.text() } }; }
+  const d = p.data || {}, n = p.notification || {};
+  const title = d.title || n.title || 'Prodiakon';
+  e.waitUntil(self.registration.showNotification(title, {
+    body: d.body || n.body || '',
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: d.tag || title,
+    data: { link: d.link || p.fcmOptions?.link || './' },
+  }));
+});
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const link = new URL(e.notification.data?.link || './', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+    const open = list.find(c => c.url.startsWith(self.registration.scope));
+    if (open) { open.focus(); return open.navigate(link).catch(() => {}); }
+    return self.clients.openWindow(link);
+  }));
 });

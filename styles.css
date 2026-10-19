@@ -224,3 +224,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .issue.tap:active, .issue.tap:hover { background: #f7faf8; }
 .issue .tx { flex: 1; }
 .issue .go { flex: none; color: var(--muted); font-size: 1.2rem; }
+/* Notifikasi */
+.push-box { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.push-box > div { flex: 1; min-width: 0; }
+.push-cta { display: flex; align-items: center; gap: 10px; justify-content: space-between; padding: 10px 12px; margin-bottom: 10px; border-radius: var(--radius); background: #fff7e0; border: 1px solid #f1d58a; font-size: .9rem; }
