@@ -162,6 +162,11 @@ if (typeof Deno !== 'undefined') {
       }
     }
 
+    if (type === 'test') {
+      // Uji coba: select public.notify_call('test', '<user_id>');
+      await send([user_id], 'Tes notifikasi Prodiakon', 'Notifikasi berhasil diterima di perangkat ini. 🙏', appUrl);
+    }
+
     if (type === 'reminder') {
       const day = tomorrowWIB();
       const { data: parokis } = await db.from('paroki').select('*').eq('active', true);
