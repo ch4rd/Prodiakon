@@ -313,6 +313,11 @@ create table if not exists public.sponsor (
   constraint sponsor_link_ok   check (link = '' or link ~ '^https://'),
   constraint sponsor_periode   check (mulai is null or selesai is null or mulai <= selesai)
 );
+-- Gambar banner lebar (seperti header), opsional; data URL ≤ 300 KB
+alter table public.sponsor add column if not exists banner text not null default '';
+alter table public.sponsor drop constraint if exists sponsor_banner_size;
+alter table public.sponsor add constraint sponsor_banner_size
+  check (banner = '' or (banner like 'data:image/%' and length(banner) <= 300000));
 create index if not exists sponsor_paroki_idx on public.sponsor (paroki_id);
 drop trigger if exists sponsor_touch on public.sponsor;
 create trigger sponsor_touch before update on public.sponsor for each row execute function public.touch_updated_at();

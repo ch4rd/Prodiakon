@@ -1598,8 +1598,9 @@ function openParokiForm(p) {
   }));
 }
 
-// Perkecil gambar di browser (sisi terpanjang ≤ max px) → data URL WebP (cadangan PNG), agar ringan disimpan
-async function shrinkImage(file, max) {
+// Perkecil gambar di browser (sisi terpanjang ≤ max px) → data URL WebP, agar ringan disimpan.
+// photo: true → cadangan JPEG (untuk banner foto; Safari tidak bisa menyimpan WebP), kualitas diturunkan bila masih besar.
+async function shrinkImage(file, max, { limit = 200000, photo = false } = {}) {
   if (!file.type.startsWith('image/')) throw new Error('File harus berupa gambar');
   const url = URL.createObjectURL(file);
   try {
@@ -1607,10 +1608,16 @@ async function shrinkImage(file, max) {
     const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
     const c = document.createElement('canvas');
     c.width = Math.max(1, Math.round(img.naturalWidth * k)); c.height = Math.max(1, Math.round(img.naturalHeight * k));
-    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-    let out = c.toDataURL('image/webp', 0.85);
-    if (!out.startsWith('data:image/webp')) out = c.toDataURL('image/png');
-    if (out.length > 200000) throw new Error('Gambar terlalu besar setelah diperkecil, coba gambar lain');
+    const ctx = c.getContext('2d');
+    if (photo) { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); } // JPEG tidak punya transparansi
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    let out = '';
+    for (const qv of [0.85, 0.72, 0.6, 0.48]) {
+      out = c.toDataURL('image/webp', qv);
+      if (!out.startsWith('data:image/webp')) out = photo ? c.toDataURL('image/jpeg', qv) : c.toDataURL('image/png');
+      if (out.length <= limit || (!photo && !out.startsWith('data:image/webp'))) break;
+    }
+    if (out.length > limit) throw new Error('Gambar terlalu besar setelah diperkecil, coba gambar lain');
     return out;
   } finally { URL.revokeObjectURL(url); }
 }
@@ -1631,6 +1638,13 @@ function sponsorCard() {
   const list = activeSponsors();
   if (!list.length) return '';
   const sp = list[S.sponsorAt++ % list.length];
+  if (sp.banner) {
+    const inner = `<img class="sp-banner" src="${h(sp.banner)}" alt="${h(sp.nama)}" loading="lazy">
+      <div class="sp-cap"><span class="hint">Didukung oleh</span> <b>${h(sp.nama)}</b>${sp.teks ? ` · ${h(sp.teks)}` : ''}</div>`;
+    return /^https:\/\//.test(sp.link)
+      ? `<a class="sponsor banner" href="${h(sp.link)}" target="_blank" rel="noopener sponsored">${inner}</a>`
+      : `<div class="sponsor banner">${inner}</div>`;
+  }
   const inner = `${sp.logo ? `<img src="${h(sp.logo)}" alt="" loading="lazy">` : ''}
     <div class="sp-tx"><div class="hint">Didukung oleh</div><b>${h(sp.nama)}</b>${sp.teks ? `<div class="sp-desc">${h(sp.teks)}</div>` : ''}</div>
     ${sp.link ? '<span class="go">›</span>' : ''}`;
@@ -1657,7 +1671,7 @@ function openSponsorList() {
     return `<div class="urow tap" data-sh="sp-edit" data-id="${h(sp.id)}">
       ${sp.logo ? `<img class="sp-thumb" src="${h(sp.logo)}" alt="">` : '<span class="sp-thumb">🤝</span>'}
       <div class="mi"><span class="nm">${h(sp.nama)}</span> <span class="tag ${cls}">${h(st)}</span>
-        <div class="ad">${per[0] || per[1] ? `${per[0] || '…'} – ${per[1] || 'seterusnya'}` : 'Tanpa batas waktu'}${sp.link ? ' · ada link' : ''}</div></div>
+        <div class="ad">${per[0] || per[1] ? `${per[0] || '…'} – ${per[1] || 'seterusnya'}` : 'Tanpa batas waktu'}${sp.banner ? ' · banner' : ''}${sp.link ? ' · ada link' : ''}</div></div>
       <span class="go">›</span></div>`;
   }).join('');
   const body = `<div class="list">${rows || '<div class="empty-state small">Belum ada sponsor.</div>'}</div>
@@ -1674,8 +1688,8 @@ function openSponsorList() {
 
 function openSponsorForm(sp) {
   const isNew = !sp;
-  sp = sp ? { ...sp } : { id: uid(), nama: '', teks: '', logo: '', link: '', mulai: null, selesai: null, active: true, urutan: 0 };
-  let logo = sp.logo || '';
+  sp = sp ? { ...sp } : { id: uid(), nama: '', teks: '', logo: '', banner: '', link: '', mulai: null, selesai: null, active: true, urutan: 0 };
+  let logo = sp.logo || '', banner = sp.banner || '';
   const body = `
     <div class="logo-edit">
       <img id="spLogoPrev" src="${h(logo || 'icons/icon.svg')}" alt="" width="72" height="72">
@@ -1683,6 +1697,14 @@ function openSponsorForm(sp) {
         <div class="fld">Logo sponsor (opsional)</div>
         <label class="btn small">Pilih gambar…<input type="file" id="spLogoFile" accept="image/*" hidden></label>
         <button type="button" class="btn small" data-sh="sp-logo-clear">Tanpa logo</button>
+      </div>
+    </div>
+    <div class="fld">Gambar banner lebar (opsional, disarankan ±3:1, mis. 900×300)</div>
+    <div class="banner-edit">
+      <div id="spBannerPrev" class="banner-prev">${banner ? `<img src="${h(banner)}" alt="">` : '<span class="hint">Belum ada banner — kartu memakai logo + teks</span>'}</div>
+      <div class="btns">
+        <label class="btn small">Pilih banner…<input type="file" id="spBannerFile" accept="image/*" hidden></label>
+        <button type="button" class="btn small" data-sh="sp-banner-clear">Hapus banner</button>
       </div>
     </div>
     <label class="fld">Nama sponsor<input name="nama" required maxlength="80" value="${h(sp.nama)}" placeholder="Toko Rohani Santo Yosef"></label>
@@ -1700,7 +1722,7 @@ function openSponsorForm(sp) {
   openSheet(isNew ? 'Sponsor baru' : 'Ubah sponsor', body, {
     save: async fd => {
       const row = {
-        ...sp, nama: fd.get('nama').trim(), teks: fd.get('teks').trim(), logo, link: normSponsorLink(fd.get('link')),
+        ...sp, nama: fd.get('nama').trim(), teks: fd.get('teks').trim(), logo, banner, link: normSponsorLink(fd.get('link')),
         mulai: fd.get('mulai') || null, selesai: fd.get('selesai') || null,
         urutan: Number(fd.get('urutan')) || 0, active: !!fd.get('active'),
       };
@@ -1714,8 +1736,18 @@ function openSponsorForm(sp) {
       await store.remove('sponsor', sp.id);
       S.sponsor = S.sponsor.filter(x => x.id !== sp.id); render(); toast('Sponsor dihapus');
     },
-    onClick: b => { if (b.dataset.sh === 'sp-logo-clear') { logo = ''; $('#spLogoPrev').src = 'icons/icon.svg'; } },
+    onClick: b => {
+      if (b.dataset.sh === 'sp-logo-clear') { logo = ''; $('#spLogoPrev').src = 'icons/icon.svg'; }
+      if (b.dataset.sh === 'sp-banner-clear') { banner = ''; $('#spBannerPrev').innerHTML = '<span class="hint">Banner dihapus — tekan Simpan</span>'; }
+    },
   });
+  $('#spBannerFile').addEventListener('change', e => run(async () => {
+    const file = e.target.files[0];
+    if (!file) return;
+    banner = await shrinkImage(file, 960, { limit: 300000, photo: true });
+    $('#spBannerPrev').innerHTML = `<img src="${h(banner)}" alt="">`;
+    toast(`Banner siap (${Math.round(banner.length / 1024)} KB) — tekan Simpan`);
+  }));
   $('#spLogoFile').addEventListener('change', e => run(async () => {
     const file = e.target.files[0];
     if (!file) return;

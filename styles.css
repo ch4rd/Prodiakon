@@ -247,3 +247,11 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .urow.tap { cursor: pointer; }
 .sp-thumb { width: 36px; height: 36px; object-fit: contain; border-radius: 6px; flex: none; display: grid; place-items: center; background: #f6f9f7; }
 .tag.ok { background: #e3f4e8; color: #166534; }
+/* Sponsor banner lebar */
+.sponsor.banner { flex-direction: column; align-items: stretch; gap: 0; padding: 0; overflow: hidden; }
+.sponsor .sp-banner { width: 100%; height: auto; max-height: 220px; object-fit: cover; display: block; border-radius: 0; background: #f6f9f7; }
+.sponsor .sp-cap { padding: 7px 12px; font-size: .82rem; color: var(--muted); }
+.sponsor .sp-cap b { color: var(--ink); }
+.banner-edit { display: flex; flex-direction: column; gap: 6px; }
+.banner-prev { min-height: 60px; border: 1px dashed var(--line); border-radius: 8px; display: grid; place-items: center; overflow: hidden; background: #f6f9f7; }
+.banner-prev img { width: 100%; max-height: 160px; object-fit: cover; display: block; }
