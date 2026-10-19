@@ -98,7 +98,7 @@ function download(name, text, type) {
 class LocalStore {
   constructor() { this.key = 'prodiakon.data.v1'; }
   read() {
-    const empty = { months: [], misa: [], smk_groups: [], umat: [], petugas: [] };
+    const empty = { months: [], misa: [], smk_groups: [], umat: [], petugas: [], sponsor: [] };
     try { return { ...empty, ...JSON.parse(lsGet(this.key) || '{}') }; } catch { return empty; }
   }
   write(d) { localStorage.setItem(this.key, JSON.stringify(d)); }
@@ -224,7 +224,7 @@ const S = {
   umat: [], smkView: lsGet('prodiakon.smkView') || 'grup', umatQ: '',
   userId: null, pendingUsers: 0, me: null, pickName: false,
   petugas: [], petugasView: 'tugas', petugasQ: '',
-  super: false, parokiList: [],
+  super: false, parokiList: [], sponsor: [], sponsorAt: Math.floor(Math.random() * 1000),
 };
 // Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
 let UM = new Map();
@@ -266,6 +266,7 @@ function cmpMisa(a, b) {
 }
 
 async function loadMonths() {
+  S.sponsor = await store.list('sponsor').catch(() => []);
   S.months = (await store.list('months')).sort((a, b) => b.id.localeCompare(a.id));
   const saved = lsGet('prodiakon.month');
   const now = iso(new Date()).slice(0, 7);
@@ -348,7 +349,7 @@ function renderMisa(main) {
     if (m.date !== last) { html += `<h3 class="day">${h(fmtLong(m.date))}</h3>`; last = m.date; }
     html += misaCard(m);
   }
-  main.innerHTML = html;
+  main.innerHTML = html + sponsorCard();
 }
 
 function misaCard(m, highlight) {
@@ -643,7 +644,8 @@ function renderSaya(main) {
     ${block(smk, 'Tidak ada tugas antar SMK bulan ini.')}
     <div class="sec-title">⛪ Misa saya <span class="count">${misa.length} tugas</span></div>
     ${block(misa, 'Tidak ada tugas misa bulan ini.')}
-    ${items.length ? `<div class="btns" style="margin-top:12px"><button class="btn primary" data-act="share" data-k="${h(norm(name))}">Bagikan / salin jadwal saya</button></div>` : ''}`;
+    ${items.length ? `<div class="btns" style="margin-top:12px"><button class="btn primary" data-act="share" data-k="${h(norm(name))}">Bagikan / salin jadwal saya</button></div>` : ''}
+    ${sponsorCard()}`;
 }
 const mapsUrl = alamat => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(alamat)}`;
 
@@ -1148,6 +1150,7 @@ function openMenu() {
     S.admin && hasSeedData() && !hasSeed && ['load-seed', '🧾 Muat data Oktober 2026'],
     ONLINE && S.admin && ['users', `👥 Pengguna${S.pendingUsers ? ` (${S.pendingUsers} menunggu)` : ''}`],
     S.admin && ['paroki-settings', '⛪ Pengaturan paroki (nama, jam misa)'],
+    S.admin && ['sponsor', `🤝 Sponsor${S.sponsor.length ? ` (${activeSponsors().length} tayang)` : ''}`],
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
     ONLINE && ['profile', '👤 Profil saya'],
     ONLINE && ['logout', '🚪 Keluar'],
@@ -1161,10 +1164,11 @@ function openMenu() {
 }
 
 async function menuAction(k) {
-  if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users', 'paroki-settings'].includes(k)) return;
+  if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users', 'paroki-settings', 'sponsor'].includes(k)) return;
   if (k === 'users') return run(openUsers);
   if (k === 'profile') return openProfile();
   if (k === 'paroki-settings') return openParokiForm(P);
+  if (k === 'sponsor') return openSponsorList();
   if (k === 'paroki') return S.super && run(openMasterParoki);
   if (k === 'new-month') openNewMonth();
   else if (k === 'settings') openMonthSettings();
@@ -1609,6 +1613,116 @@ async function shrinkImage(file, max) {
     if (out.length > 200000) throw new Error('Gambar terlalu besar setelah diperkecil, coba gambar lain');
     return out;
   } finally { URL.revokeObjectURL(url); }
+}
+
+/* ---- Sponsor ---- */
+const todayIso = () => iso(new Date());
+const sponsorStatus = sp => {
+  const t = todayIso();
+  if (!sp.active) return ['Nonaktif', 'warn'];
+  if (sp.mulai && sp.mulai > t) return [`Mulai ${fmtShort(sp.mulai)}`, ''];
+  if (sp.selesai && sp.selesai < t) return ['Selesai', 'warn'];
+  return ['Tayang', 'ok'];
+};
+const activeSponsors = () => S.sponsor.filter(sp => sponsorStatus(sp)[0] === 'Tayang')
+  .sort((a, b) => (a.urutan ?? 0) - (b.urutan ?? 0) || a.nama.localeCompare(b.nama));
+// Satu sponsor per tampilan, bergantian setiap kali halaman digambar ulang
+function sponsorCard() {
+  const list = activeSponsors();
+  if (!list.length) return '';
+  const sp = list[S.sponsorAt++ % list.length];
+  const inner = `${sp.logo ? `<img src="${h(sp.logo)}" alt="" loading="lazy">` : ''}
+    <div class="sp-tx"><div class="hint">Didukung oleh</div><b>${h(sp.nama)}</b>${sp.teks ? `<div class="sp-desc">${h(sp.teks)}</div>` : ''}</div>
+    ${sp.link ? '<span class="go">›</span>' : ''}`;
+  return /^https:\/\//.test(sp.link)
+    ? `<a class="sponsor" href="${h(sp.link)}" target="_blank" rel="noopener sponsored">${inner}</a>`
+    : `<div class="sponsor">${inner}</div>`;
+}
+// Link sponsor: https://… atau nomor WA → https://wa.me/62…
+function normSponsorLink(v) {
+  const t = String(v || '').trim();
+  if (!t) return '';
+  if (/^https:\/\/\S+$/i.test(t)) return t;
+  if (/^http:\/\//i.test(t)) return t.replace(/^http:/i, 'https:');
+  if (/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(t)) return 'https://' + t;
+  const wa = normWa(t);
+  if (wa) return `https://wa.me/62${wa.slice(1)}`;
+  throw new Error('Link harus alamat web (https://…) atau nomor WA (08…)');
+}
+
+function openSponsorList() {
+  const rows = [...S.sponsor].sort((a, b) => (a.urutan ?? 0) - (b.urutan ?? 0) || a.nama.localeCompare(b.nama)).map(sp => {
+    const [st, cls] = sponsorStatus(sp);
+    const per = [sp.mulai && fmtShort(sp.mulai), sp.selesai && fmtShort(sp.selesai)];
+    return `<div class="urow tap" data-sh="sp-edit" data-id="${h(sp.id)}">
+      ${sp.logo ? `<img class="sp-thumb" src="${h(sp.logo)}" alt="">` : '<span class="sp-thumb">🤝</span>'}
+      <div class="mi"><span class="nm">${h(sp.nama)}</span> <span class="tag ${cls}">${h(st)}</span>
+        <div class="ad">${per[0] || per[1] ? `${per[0] || '…'} – ${per[1] || 'seterusnya'}` : 'Tanpa batas waktu'}${sp.link ? ' · ada link' : ''}</div></div>
+      <span class="go">›</span></div>`;
+  }).join('');
+  const body = `<div class="list">${rows || '<div class="empty-state small">Belum ada sponsor.</div>'}</div>
+    <button type="button" class="btn primary" data-sh="sp-new">＋ Sponsor baru</button>
+    <p class="hint">Kartu "Didukung oleh …" tampil di bawah tab Saya dan Misa untuk pengguna ${h(P.nama)} yang sudah login,
+      bergantian bila lebih dari satu. Tidak memakai iklan pihak ketiga.</p>`;
+  openSheet(`Sponsor ${P.nama}`, body, {
+    onClick: b => {
+      if (b.dataset.sh === 'sp-new') { dlg.close(); openSponsorForm(); }
+      else if (b.dataset.sh === 'sp-edit') { dlg.close(); openSponsorForm(S.sponsor.find(x => x.id === b.dataset.id)); }
+    },
+  });
+}
+
+function openSponsorForm(sp) {
+  const isNew = !sp;
+  sp = sp ? { ...sp } : { id: uid(), nama: '', teks: '', logo: '', link: '', mulai: null, selesai: null, active: true, urutan: 0 };
+  let logo = sp.logo || '';
+  const body = `
+    <div class="logo-edit">
+      <img id="spLogoPrev" src="${h(logo || 'icons/icon.svg')}" alt="" width="72" height="72">
+      <div class="logo-btns">
+        <div class="fld">Logo sponsor (opsional)</div>
+        <label class="btn small">Pilih gambar…<input type="file" id="spLogoFile" accept="image/*" hidden></label>
+        <button type="button" class="btn small" data-sh="sp-logo-clear">Tanpa logo</button>
+      </div>
+    </div>
+    <label class="fld">Nama sponsor<input name="nama" required maxlength="80" value="${h(sp.nama)}" placeholder="Toko Rohani Santo Yosef"></label>
+    <label class="fld">Teks singkat (maks. 200 huruf)<textarea name="teks" rows="2" maxlength="200" placeholder="Perlengkapan liturgi & rosario. Diskon 10% untuk umat.">${h(sp.teks)}</textarea></label>
+    <label class="fld">Link: website atau nomor WA<input name="link" value="${h(sp.link)}" placeholder="https://… atau 0812…" inputmode="url"></label>
+    <div class="grid2">
+      <label class="fld">Mulai tayang<input type="date" name="mulai" value="${h(sp.mulai || '')}"></label>
+      <label class="fld">Selesai tayang<input type="date" name="selesai" value="${h(sp.selesai || '')}"></label>
+    </div>
+    <div class="grid2">
+      <label class="fld">Urutan (kecil tampil dulu)<input type="number" name="urutan" value="${sp.urutan ?? 0}"></label>
+      <label style="align-self:end"><input type="checkbox" name="active" ${sp.active ? 'checked' : ''}> Aktif</label>
+    </div>
+    <p class="hint">Kosongkan tanggal bila tanpa batas waktu.</p>`;
+  openSheet(isNew ? 'Sponsor baru' : 'Ubah sponsor', body, {
+    save: async fd => {
+      const row = {
+        ...sp, nama: fd.get('nama').trim(), teks: fd.get('teks').trim(), logo, link: normSponsorLink(fd.get('link')),
+        mulai: fd.get('mulai') || null, selesai: fd.get('selesai') || null,
+        urutan: Number(fd.get('urutan')) || 0, active: !!fd.get('active'),
+      };
+      if (!row.nama) throw new Error('Nama sponsor wajib diisi');
+      if (row.mulai && row.selesai && row.mulai > row.selesai) throw new Error('Tanggal selesai harus setelah tanggal mulai');
+      await store.upsert('sponsor', [row]);
+      S.sponsor = [...S.sponsor.filter(x => x.id !== row.id), row];
+      render(); toast(`${isNew ? 'Sponsor ditambahkan' : 'Tersimpan'} · ${sponsorStatus(row)[0]}`);
+    },
+    del: isNew ? null : async () => {
+      await store.remove('sponsor', sp.id);
+      S.sponsor = S.sponsor.filter(x => x.id !== sp.id); render(); toast('Sponsor dihapus');
+    },
+    onClick: b => { if (b.dataset.sh === 'sp-logo-clear') { logo = ''; $('#spLogoPrev').src = 'icons/icon.svg'; } },
+  });
+  $('#spLogoFile').addEventListener('change', e => run(async () => {
+    const file = e.target.files[0];
+    if (!file) return;
+    logo = await shrinkImage(file, 256);
+    $('#spLogoPrev').src = logo;
+    toast(`Logo siap (${Math.round(logo.length / 1024)} KB) — tekan Simpan`);
+  }));
 }
 
 async function openMasterParoki() {

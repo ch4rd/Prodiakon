@@ -294,6 +294,35 @@ create policy admins_delete on public.admins for delete to authenticated using (
 drop policy if exists super_admins_select on public.super_admins;
 create policy super_admins_select on public.super_admins for select to authenticated using (user_id = auth.uid());
 
+/* ================= Sponsor per paroki ================= */
+-- Kartu "Didukung oleh …" di app; dikelola admin paroki, dilihat anggota yang sudah disetujui.
+create table if not exists public.sponsor (
+  id         uuid primary key default gen_random_uuid(),
+  paroki_id  uuid not null references public.paroki(id) on delete cascade,
+  nama       text not null,
+  teks       text not null default '',
+  logo       text not null default '',              -- data URL kecil (diperkecil di app)
+  link       text not null default '',              -- https://… (website / wa.me)
+  mulai      date,                                  -- kosong = langsung tayang
+  selesai    date,                                  -- kosong = tanpa batas
+  active     boolean not null default true,
+  urutan     int not null default 0,
+  updated_at timestamptz not null default now(),
+  constraint sponsor_logo_size check (logo = '' or (logo like 'data:image/%' and length(logo) <= 200000)),
+  constraint sponsor_teks_len  check (length(teks) <= 200),
+  constraint sponsor_link_ok   check (link = '' or link ~ '^https://'),
+  constraint sponsor_periode   check (mulai is null or selesai is null or mulai <= selesai)
+);
+create index if not exists sponsor_paroki_idx on public.sponsor (paroki_id);
+drop trigger if exists sponsor_touch on public.sponsor;
+create trigger sponsor_touch before update on public.sponsor for each row execute function public.touch_updated_at();
+alter table public.sponsor enable row level security;
+drop policy if exists sponsor_read  on public.sponsor;
+drop policy if exists sponsor_write on public.sponsor;
+create policy sponsor_read  on public.sponsor for select to authenticated using (public.is_member_of(paroki_id));
+create policy sponsor_write on public.sponsor for all to authenticated
+  using (public.is_admin_of(paroki_id)) with check (public.is_admin_of(paroki_id));
+
 -- Fungsi versi lama (satu paroki) dihapus setelah semua policy lama diganti
 drop function if exists public.is_approved();
 drop function if exists public.is_admin();
