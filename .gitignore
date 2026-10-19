@@ -2,3 +2,4 @@ seed.js
 *.bak
 Thumbs.db
 .DS_Store
+supabase/.temp/
