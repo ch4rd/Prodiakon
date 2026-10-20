@@ -214,6 +214,20 @@ end $$;
 revoke all on function public.update_my_profile(text, text) from public, anon;
 grant execute on function public.update_my_profile(text, text) to authenticated;
 
+-- Hapus akun (hanya super admin). Menghapus login di auth.users; app_users, admins, push_tokens ikut terhapus (cascade).
+-- Jadwal tidak tersentuh karena menyimpan nama petugas, bukan akun. Tidak bisa menghapus diri sendiri / super admin lain.
+create or replace function public.delete_user(p_user uuid) returns void
+language plpgsql security definer set search_path = public, auth as $$
+begin
+  if not public.is_super() then raise exception 'Hanya super admin yang boleh menghapus akun'; end if;
+  if p_user = auth.uid() then raise exception 'Tidak bisa menghapus akun sendiri'; end if;
+  if exists (select 1 from public.super_admins where user_id = p_user) then raise exception 'Tidak bisa menghapus akun super admin'; end if;
+  delete from auth.users where id = p_user;
+  if not found then raise exception 'Akun tidak ditemukan'; end if;
+end $$;
+revoke all on function public.delete_user(uuid) from public, anon;
+grant execute on function public.delete_user(uuid) to authenticated;
+
 /* ================= Akun baru → app_users ================= */
 -- Paroki diambil dari slug yang dikirim app saat daftar (metadata 'paroki')
 create or replace function public.handle_new_user() returns trigger

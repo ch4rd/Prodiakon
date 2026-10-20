@@ -183,6 +183,10 @@ class SupaStore {
     if (error) throw error;
     return data.map(x => x.user_id);
   }
+  async deleteUser(id) {
+    const { error } = await this.sb.rpc('delete_user', { p_user: id });
+    if (error) throw error;
+  }
   async setAdmin(u, on) {
     const q = on
       ? this.sb.from('admins').insert({ user_id: u.user_id, paroki_id: P.id, email: u.email })
@@ -1353,6 +1357,7 @@ async function openUsers() {
       u.status !== 'approved' && `<button type="button" class="btn small primary" data-sh="u-approved" data-id="${h(u.user_id)}">Setujui</button>`,
       u.status !== 'rejected' && `<button type="button" class="btn small" data-sh="u-rejected" data-id="${h(u.user_id)}">${u.status === 'approved' ? 'Cabut' : 'Tolak'}</button>`,
       u.status === 'approved' && `<button type="button" class="btn small" data-sh="u-admin" data-id="${h(u.user_id)}">${admins.includes(u.user_id) ? 'Cabut admin' : 'Jadikan admin'}</button>`,
+      S.super && `<button type="button" class="btn small danger" data-sh="u-delete" data-id="${h(u.user_id)}">Hapus akun</button>`,
     ].filter(Boolean).join('');
     const names = masterNames();
     const cur = names.find(x => norm(x) === norm(u.petugas)) || u.petugas
@@ -1373,6 +1378,16 @@ async function openUsers() {
     + '<p class="hint">Yang disetujui bisa melihat jadwal & alamat umat (tanpa bisa mengubah). Hak admin diatur di Supabase SQL Editor (tabel admins).</p>';
   openSheet('Pengguna', body, {
     onClick: async b => {
+      if (b.dataset.sh === 'u-delete') {
+        const u = list.find(x => x.user_id === b.dataset.id), who = u.nama || u.email;
+        if (!confirm(`Hapus akun ${who} (${u.email}) secara permanen?
+
+Orang ini tidak bisa login lagi; status admin & token notifikasinya ikut terhapus. Jadwal tidak berubah. Ia bisa mendaftar ulang bila perlu.`)) return;
+        if (prompt(`Ketik HAPUS untuk menghapus akun ${who}`) !== 'HAPUS') { toast('Dibatalkan'); return; }
+        if ((await run(() => store.deleteUser(u.user_id))) === false) return;
+        toast(`Akun ${who} dihapus`);
+        dlg.close(); await run(openUsers); return;
+      }
       if (b.dataset.sh === 'u-admin') {
         const u = list.find(x => x.user_id === b.dataset.id), on = !admins.includes(u.user_id);
         if (!confirm(on ? `Jadikan ${u.nama || u.email} admin ${P.nama}? Admin bisa mengubah semua data paroki ini.` : `Cabut hak admin ${u.nama || u.email}?`)) return;
