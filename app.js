@@ -1378,7 +1378,7 @@ async function openUsers() {
   const body = (sec('pending', 'Menunggu persetujuan') + sec('approved', 'Disetujui') + sec('rejected', 'Ditolak / dicabut')
     || '<div class="empty-state">Belum ada pengguna.</div>')
     + '<p class="hint">Sebelum <b>Setujui</b>, pilih "Nama di jadwal" untuk menautkan ke petugas yang sudah ada. Bila dibiarkan kosong, nama pendaftar ditambahkan ke Master petugas.</p>'
-    + '<p class="hint">Yang disetujui bisa melihat jadwal & alamat umat (tanpa bisa mengubah). Hak admin diatur di Supabase SQL Editor (tabel admins).</p>';
+    + '<p class="hint">Yang disetujui bisa melihat jadwal & alamat umat (tanpa bisa mengubah). Admin bisa mengubah data paroki ini dan mengangkat admin lain lewat tombol Jadikan admin.</p>';
   openSheet('Pengguna', body, {
     onClick: async b => {
       if (b.dataset.sh === 'u-delete') {

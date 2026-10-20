@@ -1,5 +1,5 @@
 // Service worker: app tetap bisa dibuka saat sinyal jelek. Naikkan VERSION setiap deploy perubahan.
-const VERSION = 'prodiakon-v23';
+const VERSION = 'prodiakon-v24';
 const SHELL = [
   './', 'index.html', 'styles.css', 'app.js', 'config.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png',
@@ -18,8 +18,11 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   const isShell = e.request.method === 'GET' && (url.origin === location.origin || url.hostname === 'cdn.jsdelivr.net');
   if (!isShell) return; // API Supabase selalu langsung ke jaringan
-  // network-first: selalu ambil versi terbaru, pakai cache bila offline
-  e.respondWith(fetch(e.request).then(res => {
+  // network-first: selalu ambil versi terbaru, pakai cache bila offline.
+  // File app sendiri dicek ulang ke server (cache: 'no-cache' → 304 bila sama), karena GitHub Pages
+  // memberi max-age 10 menit sehingga update baru tidak langsung terlihat.
+  const req = url.origin === location.origin ? fetch(url.href, { cache: 'no-cache', credentials: 'same-origin' }) : fetch(e.request);
+  e.respondWith(req.then(res => {
     if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
     return res;
   }).catch(() => caches.match(e.request)));
