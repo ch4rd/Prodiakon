@@ -1353,19 +1353,22 @@ async function openUsers() {
   const [list, admins] = await Promise.all([store.listUsers(), store.listAdmins().catch(() => [])]);
   S.pendingUsers = list.filter(u => u.status === 'pending').length;
   const row = u => {
-    const btns = u.user_id === S.userId ? '<span class="tag">Anda</span>' : [
+    // Tombol di baris sendiri di bawah info; "Hapus akun" dipisah di kiri agar tidak tertekan tak sengaja
+    const me = u.user_id === S.userId;
+    const main = me ? [] : [
       u.status !== 'approved' && `<button type="button" class="btn small primary" data-sh="u-approved" data-id="${h(u.user_id)}">Setujui</button>`,
-      u.status !== 'rejected' && `<button type="button" class="btn small" data-sh="u-rejected" data-id="${h(u.user_id)}">${u.status === 'approved' ? 'Cabut' : 'Tolak'}</button>`,
+      u.status !== 'rejected' && `<button type="button" class="btn small" data-sh="u-rejected" data-id="${h(u.user_id)}">${u.status === 'approved' ? 'Cabut akses' : 'Tolak'}</button>`,
       u.status === 'approved' && `<button type="button" class="btn small" data-sh="u-admin" data-id="${h(u.user_id)}">${admins.includes(u.user_id) ? 'Cabut admin' : 'Jadikan admin'}</button>`,
-      S.super && `<button type="button" class="btn small danger" data-sh="u-delete" data-id="${h(u.user_id)}">Hapus akun</button>`,
-    ].filter(Boolean).join('');
+    ].filter(Boolean);
+    const del = !me && S.super ? `<button type="button" class="btn small danger" data-sh="u-delete" data-id="${h(u.user_id)}">Hapus akun</button>` : '';
+    const btns = main.length || del ? `<div class="u-actions">${del}<span class="sp"></span>${main.join('')}</div>` : '';
     const names = masterNames();
     const cur = names.find(x => norm(x) === norm(u.petugas)) || u.petugas
       || (u.status === 'pending' ? names.find(x => norm(x) === norm(u.nama)) || '' : '');
     const link = u.status === 'rejected' ? '' : `<label class="u-link">Nama di jadwal
         <select data-uid="${h(u.user_id)}">${opt('', '— belum ditautkan —', cur)}${(cur && !names.includes(cur) ? [cur] : []).concat(names).map(n => opt(n, n, cur)).join('')}</select></label>`;
-    return `<div class="urow"><div class="mi"><span class="nm">${h(u.nama || '(tanpa nama)')}</span>${admins.includes(u.user_id) ? ' <span class="tag">Admin</span>' : ''}
-      <div class="ad">${h(u.email)} · daftar ${h(fmtShort(u.created_at.slice(0, 10)))}</div>
+    return `<div class="urow u-card"><div class="mi"><span class="nm">${h(u.nama || '(tanpa nama)')}</span>${admins.includes(u.user_id) ? ' <span class="tag">Admin</span>' : ''}${me ? ' <span class="tag">Anda</span>' : ''}
+      <div class="ad">${h(u.email)}</div><div class="ad">Daftar ${h(fmtShort(u.created_at.slice(0, 10)))}</div>
       ${u.wa ? `<div class="phones">${phoneLinks(u.wa)}</div>` : ''}${link}</div>${btns}</div>`;
   };
   const sec = (st, title) => {
