@@ -67,7 +67,7 @@ export function tasksOn(day: string, slots: Slot[], misa: Misa[], groups: Group[
     sundays.forEach((sun, i) => {
       if (slotDate(s, sun) !== day || !g.officers[i]) return;
       const n = (g.members || []).length;
-      add(g.officers[i], `Antar SMK grup ${g.no} (${DAYS[s.day]} pk ${s.time}${n ? `, ${n} umat` : ''})`);
+      add(g.officers[i], `Hantaran grup ${g.no} (${DAYS[s.day]} pk ${s.time}${n ? `, ${n} umat` : ''})`);
     });
   }
   return out;
