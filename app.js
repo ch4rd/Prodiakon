@@ -457,7 +457,10 @@ function renderSmk(main) {
   if (v === 'umat') return renderUmat(main, bar);
   if (v === 'wilayah') return renderWilayah(main, bar);
   const wilOpts = sortedWilayah().map(w => opt(w.id, w.nama, S.smkWil)).join('');
-  main.innerHTML = bar + `${S.wilayah.length ? `<select class="search" id="smkWil">${opt('', 'Semua wilayah', S.smkWil)}${wilOpts}</select>` : ''}
+  const kosong = S.admin ? emptyHantaran().length : 0;
+  main.innerHTML = bar + `${kosong ? `<div class="push-cta">🎲 ${kosong} minggu hantaran belum ada petugasnya.
+      <button class="btn small primary" data-act="auto-hantaran">Isi otomatis</button></div>` : ''}
+    ${S.wilayah.length ? `<select class="search" id="smkWil">${opt('', 'Semua wilayah', S.smkWil)}${wilOpts}</select>` : ''}
     <input class="search" id="smkQ" type="search" placeholder="Cari umat, petugas, lingkungan, alamat…" value="${h(S.smkQ)}">
     <div id="smkList"></div>
     ${curMonth()?.notes ? `<div class="notes-box"><b>Catatan</b>\n${h(curMonth().notes)}</div>` : ''}`;
@@ -1506,6 +1509,7 @@ $('#main').addEventListener('click', e => {
   if (act === 'new-ling') { if (S.admin) openLingkunganForm(k ? { wilayah_id: k } : undefined); return; }
   if (act === 'share-misa') { const m = S.misa.find(x => x.id === id); if (m) run(() => openMisaPoster(m)); return; }
   if (act === 'auto-fill') { if (S.admin) openAutoFill(); return; }
+  if (act === 'auto-hantaran') { if (S.admin) openHantaranFill(); return; }
   if (act === 'koor') { const m = S.misa.find(x => x.id === id); if (m && canCoordinate(m)) { S.prevTab = S.tab; S.tab = 'koor'; S.koorMisa = id; S.koorDraft = null; render(); window.scrollTo(0, 0); } return; }
   if (act === 'koor-back') { S.tab = S.prevTab && S.prevTab !== 'koor' ? S.prevTab : 'saya'; S.koorMisa = null; render(); return; }
   if (act === 'koor-toggle') { S.koorDraft.set(k, !S.koorDraft.get(k)); renderKoor($('#main')); return; }
@@ -2265,6 +2269,89 @@ function openGanti(oldN) {
       renderKoor($('#main'));
       toast(`${oldN} diganti ${newN}`);
     },
+  });
+}
+
+/* ---- Isi otomatis petugas hantaran ---- */
+// Minggu hantaran (slot rutin, belum lewat) yang belum ada petugasnya: [{g, i, day}]
+function emptyHantaran() {
+  const t = todayIso(), out = [];
+  for (const g of S.smk) {
+    if (!REGULAR.includes(g.slot) || !mem(g).length) continue;
+    weeks().forEach((_, i) => { const day = smkDay(g.slot, i); if (day && day >= t && !(g.officers[i] || '').trim()) out.push({ g, i, day }); });
+  }
+  return out;
+}
+
+// Calon: wilayah sama dengan umat grup, tersedia di tanggal & slot itu, belum mengantar hantaran lain
+// di akhir pekan itu, dan tidak bertugas misa di jam lain pada akhir pekan itu.
+// Urutan: yang sudah bertugas di misa jam itu dulu, lalu yang paling sedikit hantarannya bulan ini, acak.
+function planHantaranFill() {
+  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const hBusy = new Map(), mBusy = new Map(), hCount = new Map();
+  const add = (map, wk, n, v) => { if (!map.has(wk)) map.set(wk, new Map()); map.get(wk).set(norm(n), v); };
+  for (const m of S.misa) for (const n of m.officers) add(mBusy, weekKey(m.date), n, m.id);
+  for (const g of S.smk) g.officers.forEach((n, i) => {
+    const d = smkDay(g.slot, i);
+    if (n && d) { add(hBusy, weekKey(d), n, true); hCount.set(norm(n), (hCount.get(norm(n)) || 0) + 1); }
+  });
+  const plan = [];
+  for (const { g, i, day } of emptyHantaran().sort((a, b) => a.day.localeCompare(b.day) || String(a.g.no).localeCompare(String(b.g.no), 'id', { numeric: true }))) {
+    const wil = groupWilayah(g), ids = new Set(wil.map(w => w.id));
+    if (!ids.size) { plan.push({ g, i, day, pick: '', why: 'umat grup ini belum punya wilayah' }); continue; }
+    const wk = weekKey(day), lm = linkedMisa(g.slot, i);
+    const inMisa = n => !!lm && lm.officers.some(o => norm(o) === norm(n));
+    const cands = shuffle(S.petugas.filter(p => {
+      if (!p.active || !ids.has(p.wilayah_id) || unavailable(p.nama, day, g.slot)) return false;
+      if (hBusy.get(wk)?.has(norm(p.nama))) return false;                  // sudah mengantar hantaran lain minggu itu
+      const misaId = mBusy.get(wk)?.get(norm(p.nama));
+      return !misaId || misaId === lm?.id;                                  // bertugas misa lain minggu itu → tidak
+    })).sort((a, b) => (inMisa(b.nama) - inMisa(a.nama)) || ((hCount.get(norm(a.nama)) || 0) - (hCount.get(norm(b.nama)) || 0)));
+    const p = cands[0];
+    if (!p) { plan.push({ g, i, day, pick: '', why: `tidak ada petugas wilayah ${wil.map(w => w.nama).join(', ')} yang tersedia` }); continue; }
+    add(hBusy, wk, p.nama, true); hCount.set(norm(p.nama), (hCount.get(norm(p.nama)) || 0) + 1);
+    if (lm) add(mBusy, wk, p.nama, lm.id);
+    plan.push({ g, i, day, pick: p.nama, inMisa: inMisa(p.nama) });
+  }
+  return plan;
+}
+
+function openHantaranFill() {
+  let plan = planHantaranFill();
+  if (!plan.length) { toast('Semua minggu hantaran yang belum lewat sudah ada petugasnya'); return; }
+  const draw = () => {
+    const ok = plan.filter(x => x.pick), miss = plan.filter(x => !x.pick);
+    const byGroup = new Map();
+    for (const x of plan) { if (!byGroup.has(x.g.id)) byGroup.set(x.g.id, []); byGroup.get(x.g.id).push(x); }
+    return `<p class="hint">Petugas dipilih dari <b>wilayah yang sama</b> dengan umat. Yang sudah bertugas di misa jam itu didahulukan;
+        tidak memilih yang berhalangan, terkena pengecualian, atau sudah mengantar hantaran lain di akhir pekan itu.</p>
+      <div class="sec-title">${ok.length} minggu terisi${miss.length ? ` <span class="tag warn">${miss.length} masih kosong</span>` : ''}</div>
+      <div class="list">${[...byGroup.values()].map(xs => {
+        const g = xs[0].g;
+        return `<div class="asg"><div class="d">Grup ${h(g.no)} · ${h(smkSlotLabel(g.slot))} ${groupWilayah(g).map(w => `<span class="tag wil">${h(w.nama)}</span>`).join('')}</div>
+          ${xs.map(x => `<div>${h(weeks()[x.i] || fmtShort(x.day))}: ${x.pick ? `<b>${h(x.pick)}</b>${x.inMisa ? ' <span class="tag ok">sudah di misa</span>' : ''}` : `<span class="ad warn">⚠️ kosong — ${h(x.why)}</span>`}</div>`).join('')}</div>`;
+      }).join('')}</div>
+      <div class="btns"><button type="button" class="btn small" data-sh="hf-again">🎲 Acak ulang</button></div>
+      <p class="hint">Setelah diterapkan, petugas hantaran otomatis ditambahkan ke jadwal misa di jam yang sama.</p>`;
+  };
+  openSheet('Isi otomatis petugas hantaran', `<div id="hfBody">${draw()}</div>`, {
+    saveLabel: 'Terapkan',
+    save: async () => {
+      const ok = plan.filter(x => x.pick);
+      if (!ok.length) { toast('Tidak ada petugas yang bisa diisi'); return false; }
+      const rows = new Map();
+      for (const x of ok) {
+        const r = rows.get(x.g.id) || { ...x.g, officers: weeks().map((_, i) => x.g.officers[i] || '') };
+        r.officers[x.i] = x.pick; rows.set(x.g.id, r);
+      }
+      await store.upsert('smk_groups', [...rows.values()]);
+      S.smk = S.smk.map(g => rows.get(g.id) || g);
+      let added = 0;
+      for (const r of rows.values()) added += (await addHantaranToMisa(r)).added;
+      render();
+      toast(`${ok.length} petugas hantaran diisi${added ? ` · ${added} ditambahkan ke jadwal misa` : ''}`);
+    },
+    onClick: b => { if (b.dataset.sh === 'hf-again') { plan = planHantaranFill(); $('#hfBody').innerHTML = draw(); } },
   });
 }
 
