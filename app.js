@@ -953,7 +953,7 @@ function openMisa(m) {
     <label class="fld">Jenis misa<select name="slot">${MISA_SLOTS.map(s => opt(s.key, s.key === 'LAIN' ? 'Misa khusus / lainnya' : `${s.key} · ${s.label}`, m.slot)).join('')}</select></label>
     <div class="grid2 date-row">
       <label class="fld">Tanggal<input type="date" name="date" required value="${h(m.date)}"></label>
-      <label class="fld">Jam<input name="time" value="${h(m.time)}" placeholder="17.30" inputmode="decimal"></label>
+      <label class="fld">Jam<input type="time" name="time" step="300" value="${h(toTimeInput(m.time || slotByKey(m.slot)?.time || ''))}"></label>
     </div>
     <label class="fld">Nama misa / perayaan<input name="title" value="${h(m.title)}" placeholder="Minggu Biasa"></label>
     <div class="grid2">
@@ -970,7 +970,8 @@ function openMisa(m) {
   openSheet(isNew ? 'Tambah misa' : 'Ubah misa', body, {
     save: async fd => {
       const row = {
-        ...m, date: fd.get('date'), slot: fd.get('slot'), title: fd.get('title').trim(), time: fd.get('time').trim(),
+        ...m, date: fd.get('date'), slot: fd.get('slot'), title: fd.get('title').trim(),
+        time: REGULAR.includes(fd.get('slot')) ? slotByKey(fd.get('slot')).time : fromTimeInput(fd.get('time')),
         place: fd.get('place').trim(), color: fd.get('color'), need: Number(fd.get('need')) || 0,
         officers, coordinator: fd.get('coordinator') || '', note: fd.get('note').trim(),
       };
@@ -1016,9 +1017,17 @@ function openMisa(m) {
   });
   f.elements.date.addEventListener('change', renderOfficers);
   f.elements.slot.addEventListener('change', renderOfficers);
+  // Misa rutin: jam mengikuti pengaturan paroki & dikunci; misa khusus: pilih lewat pemilih jam
+  const syncTime = () => {
+    const s = MISA_SLOTS.find(x => x.key === f.elements.slot.value), rutin = REGULAR.includes(f.elements.slot.value);
+    if (rutin && s?.time) f.elements.time.value = toTimeInput(s.time);
+    f.elements.time.readOnly = rutin;
+    f.elements.time.closest('.fld').classList.toggle('locked', rutin);
+  };
+  syncTime();
   f.elements.slot.addEventListener('change', () => {
     const s = MISA_SLOTS.find(x => x.key === f.elements.slot.value);
-    if (s?.time) f.elements.time.value = s.time;
+    syncTime();
     if (s && s.key !== 'LAIN' && !f.elements.title.value) f.elements.title.value = 'Minggu Biasa';
     if (s?.need && !Number(f.elements.need.value)) f.elements.need.value = s.need; // jumlah petugas default slot
   });
@@ -1320,6 +1329,9 @@ function openNewMonth() {
   });
 }
 const slotByKey = k => MISA_SLOTS.find(s => s.key === k);
+// Jam tersimpan sebagai '17.30'; input type=time memakai '17:30'
+const toTimeInput = t => { const m = /^(\d{1,2})[.:](\d{2})$/.exec(String(t || '').trim()); return m ? `${m[1].padStart(2, '0')}:${m[2]}` : ''; };
+const fromTimeInput = v => (v ? v.slice(0, 5).replace(':', '.') : '');
 
 function openMonthSettings() {
   const m = curMonth();
