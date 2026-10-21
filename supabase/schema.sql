@@ -342,6 +342,27 @@ create policy sponsor_read  on public.sponsor for select to authenticated using 
 create policy sponsor_write on public.sponsor for all to authenticated
   using (public.is_admin_of(paroki_id)) with check (public.is_admin_of(paroki_id));
 
+/* ================= Petugas berhalangan (sementara) ================= */
+-- Beda dengan petugas.active (permanen): rentang tanggal petugas tidak bisa bertugas (sakit, luar kota, dll).
+create table if not exists public.absences (
+  id         uuid primary key default gen_random_uuid(),
+  paroki_id  uuid not null references public.paroki(id) on delete cascade,
+  petugas_id uuid not null references public.petugas(id) on delete cascade,
+  start_date date not null,
+  end_date   date not null,
+  reason     text not null default '',
+  created_at timestamptz not null default now(),
+  constraint absences_period check (start_date <= end_date),
+  constraint absences_reason_len check (length(reason) <= 200)
+);
+create index if not exists absences_paroki_idx on public.absences (paroki_id, end_date);
+alter table public.absences enable row level security;
+drop policy if exists absences_read  on public.absences;
+drop policy if exists absences_write on public.absences;
+create policy absences_read  on public.absences for select to authenticated using (public.is_member_of(paroki_id));
+create policy absences_write on public.absences for all to authenticated
+  using (public.is_admin_of(paroki_id)) with check (public.is_admin_of(paroki_id));
+
 -- Fungsi versi lama (satu paroki) dihapus setelah semua policy lama diganti
 drop function if exists public.is_approved();
 drop function if exists public.is_admin();

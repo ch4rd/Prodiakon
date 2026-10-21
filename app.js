@@ -98,7 +98,7 @@ function download(name, text, type) {
 class LocalStore {
   constructor() { this.key = 'prodiakon.data.v1'; }
   read() {
-    const empty = { months: [], misa: [], smk_groups: [], umat: [], petugas: [], sponsor: [] };
+    const empty = { months: [], misa: [], smk_groups: [], umat: [], petugas: [], sponsor: [], absences: [] };
     try { return { ...empty, ...JSON.parse(lsGet(this.key) || '{}') }; } catch { return empty; }
   }
   write(d) { localStorage.setItem(this.key, JSON.stringify(d)); }
@@ -228,6 +228,7 @@ const S = {
   umat: [], smkView: lsGet('prodiakon.smkView') || 'grup', umatQ: '',
   userId: null, pendingUsers: 0, me: null, pickName: false,
   petugas: [], petugasView: 'tugas', petugasQ: '',
+  absences: [], absenceShowPast: false,
   super: false, parokiList: [], sponsor: [], sponsorAt: Math.floor(Math.random() * 1000),
 };
 // Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
@@ -245,11 +246,24 @@ function setPetugas(list) { S.petugas = list.sort((a, b) => a.nama.localeCompare
 const masterNames = () => S.petugas.filter(p => p.active).map(p => p.nama);
 const inMaster = n => S.petugas.find(p => norm(p.nama) === norm(n));
 // <option> petugas aktif; nama lama yang tidak ada di master tetap tampil agar tidak hilang diam-diam
-function petugasOpts(cur, placeholder, exclude = []) {
+// Petugas berhalangan (sementara) pada tanggal tertentu → catatan berhalangan atau null
+function absenceOn(name, date) {
+  const p = date && inMaster(name);
+  return p ? S.absences.find(a => a.petugas_id === p.id && a.start_date <= date && a.end_date >= date) || null : null;
+}
+const absenceLabel = a => `berhalangan s/d ${fmtShort(a.end_date)}${a.reason ? ` – ${a.reason}` : ''}`;
+// date: bila diisi, petugas yang berhalangan pada tanggal itu ditandai dan tidak bisa dipilih
+function petugasOpts(cur, placeholder, exclude = [], date = '') {
   const ex = new Set(exclude.map(norm));
   const names = masterNames().filter(n => !ex.has(norm(n)) || norm(n) === norm(cur));
   const extra = cur && !names.some(n => norm(n) === norm(cur)) ? opt(cur, `${cur} (bukan dari master)`, cur) : '';
-  return opt('', placeholder, cur ? null : '') + extra + names.map(n => opt(n, n, names.find(x => norm(x) === norm(cur)))).join('');
+  const selName = names.find(x => norm(x) === norm(cur));
+  return opt('', placeholder, cur ? null : '') + extra + names.map(n => {
+    const a = absenceOn(n, date);
+    if (!a) return opt(n, n, selName);
+    const sel = n === selName;
+    return `<option value="${h(n)}" ${sel ? 'selected' : 'disabled'}>${h(n)} (${h(absenceLabel(a))})</option>`;
+  }).join('');
 }
 const hasSeedData = () => !!window.SEED && P.slug === 'albertus'; // data awal hanya milik St. Albertus
 const umatLabel = u => (u.lingkungan ? `${u.nama} · ${u.lingkungan}` : u.nama);
@@ -271,6 +285,7 @@ function cmpMisa(a, b) {
 
 async function loadMonths() {
   S.sponsor = await store.list('sponsor').catch(() => []);
+  S.absences = await store.list('absences').catch(() => []);
   S.months = (await store.list('months')).sort((a, b) => b.id.localeCompare(a.id));
   const saved = lsGet('prodiakon.month');
   const now = iso(new Date()).slice(0, 7);
@@ -515,7 +530,7 @@ function renderMasterPetugas(main, bar, all) {
       const a = all.find(x => x.key === norm(p.nama));
       const mi = a ? a.items.filter(i => i.type === 'misa').length : 0, sm = a ? a.items.filter(i => i.type === 'smk').length : 0;
       return `<div class="umat${S.admin ? ' tap' : ''}" ${S.admin ? `data-act="edit-petugas" data-id="${h(p.id)}"` : ''}>
-        <div><span class="nm">${h(p.nama)}</span></div>
+        <div><span class="nm">${h(p.nama)}</span>${(() => { const a = nextAbsence(p.id); if (!a) return ''; const per = a.start_date <= todayIso() ? `s/d ${fmtShort(a.end_date)}` : `${fmtShort(a.start_date)} – ${fmtShort(a.end_date)}`; return ` <span class="tag warn" title="${h(a.reason)}">🚫 Berhalangan ${h(per)}</span>`; })()}</div>
         ${p.telp ? `<div class="phones">${phoneLinks(p.telp)}</div>` : ''}
         ${p.note ? `<div class="ad">📝 ${h(p.note)}</div>` : ''}
         <div class="tags">${mi || sm ? `${mi ? `<span class="tag">${mi} misa</span>` : ''}${sm ? `<span class="tag">${sm} SMK</span>` : ''}`
@@ -540,8 +555,17 @@ function openPetugasForm(p) {
     <label class="fld">Telp / HP<input name="telp" value="${h(p.telp)}" inputmode="tel"></label>
     <label class="fld">Catatan<input name="note" value="${h(p.note)}"></label>
     <label><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Aktif (bisa dipilih di jadwal)</label>
-    ${isNew ? '' : '<p class="hint">Mengganti nama akan ikut mengganti nama ini di semua jadwal misa & SMK.</p>'}`;
+    ${isNew ? '' : '<p class="hint">Mengganti nama akan ikut mengganti nama ini di semua jadwal misa & SMK.</p>'}
+    ${isNew ? '' : `<div class="fld">Berhalangan</div>
+      <div class="list">${S.absences.filter(a => a.petugas_id === p.id && a.end_date >= todayIso()).sort((a, b) => a.start_date.localeCompare(b.start_date))
+        .map(a => `<div class="urow tap" data-sh="ab-edit" data-id="${h(a.id)}"><div class="mi"><span class="nm">${h(fmtShort(a.start_date))} – ${h(fmtShort(a.end_date))}</span>
+          <div class="ad">${h(a.reason || 'tanpa keterangan')}</div></div><span class="go">›</span></div>`).join('') || '<div class="empty-state small">Tidak ada jadwal berhalangan.</div>'}</div>
+      <button type="button" class="btn small" data-sh="ab-new">🚫 Atur berhalangan</button>`}`;
   openSheet(isNew ? 'Petugas baru' : 'Ubah petugas', body, {
+    onClick: b => {
+      if (b.dataset.sh === 'ab-new') { dlg.close(); openAbsenceForm({ petugas_id: p.id }); }
+      else if (b.dataset.sh === 'ab-edit') { dlg.close(); openAbsenceForm(S.absences.find(a => a.id === b.dataset.id)); }
+    },
     save: async fd => {
       const row = { ...p, nama: fd.get('nama').trim().replace(/\s+/g, ' '), telp: fd.get('telp').trim(), note: fd.get('note').trim(), active: !!fd.get('active') };
       if (!row.nama) { toast('Nama wajib diisi'); return false; }
@@ -703,6 +727,19 @@ function buildIssues() {
       }
     });
   }
+  // Petugas yang dijadwalkan pada tanggal ia berhalangan
+  for (const m of S.misa) {
+    for (const n of m.officers) {
+      const a = absenceOn(n, m.date);
+      if (a) out.push(['❗', `${n} ${absenceLabel(a)}, tapi dijadwalkan di ${m.slot === 'LAIN' ? m.title : m.slot} ${fmtShort(m.date)}.`, `misa:${m.id}`, m.date]);
+    }
+  }
+  for (const g of S.smk) {
+    g.officers.forEach((n, i) => {
+      const day = smkDay(g.slot, i), a = n && absenceOn(n, day);
+      if (a) out.push(['❗', `${n} ${absenceLabel(a)}, tapi bertugas antar SMK grup ${g.no} (${weeks()[i] || ''}).`, `smk:${g.id}`, day]);
+    });
+  }
   for (const n of allNames()) {
     const p = inMaster(n);
     if (!p) out.push(['❗', `Petugas "${n}" ada di jadwal tapi tidak ada di Master petugas.`, `petugas-new:${n}`]);
@@ -827,6 +864,7 @@ function openMisa(m) {
     </div>
     <div class="fld">Petugas <span id="offCount"></span></div>
     <div class="chips" id="offChips"></div>
+    <div id="offAbsent"></div>
     <label class="fld">Tambah petugas (dari Master petugas)<select id="addName"></select></label>
     <label class="fld">Koordinator<select name="coordinator"></select></label>
     <label class="fld">Catatan<input name="note" value="${h(m.note)}"></label>`;
@@ -854,10 +892,16 @@ function openMisa(m) {
   // Petugas hanya dipilih dari Master petugas (chip), tidak bisa diketik bebas.
   const officers = [...m.officers];
   const renderOfficers = () => {
-    $('#addName').innerHTML = petugasOpts('', masterNames().length ? '＋ Pilih petugas…' : 'Master petugas masih kosong', officers);
+    const day = f.elements.date.value;
+    $('#addName').innerHTML = petugasOpts('', masterNames().length ? '＋ Pilih petugas…' : 'Master petugas masih kosong', officers, day);
     $('#offChips').innerHTML = officers.length
-      ? officers.map((n, i) => `<span class="chip edit${inMaster(n) ? '' : ' warn'}" title="${inMaster(n) ? '' : 'Tidak ada di Master petugas'}">${h(n)}<button type="button" data-sh="rm-off" data-i="${i}" aria-label="Hapus ${h(n)}">✕</button></span>`).join('')
+      ? officers.map((n, i) => {
+        const a = absenceOn(n, day), warn = !inMaster(n) ? 'Tidak ada di Master petugas' : a ? absenceLabel(a) : '';
+        return `<span class="chip edit${warn ? ' warn' : ''}" title="${h(warn)}">${a ? '🚫 ' : ''}${h(n)}<button type="button" data-sh="rm-off" data-i="${i}" aria-label="Hapus ${h(n)}">✕</button></span>`;
+      }).join('')
       : '<span class="hint">Belum ada petugas.</span>';
+    const offs = officers.map(n => [n, absenceOn(n, day)]).filter(x => x[1]);
+    $('#offAbsent').innerHTML = offs.map(([n, a]) => `<div class="ad warn">🚫 ${h(n)} ${h(absenceLabel(a))}</div>`).join('');
     $('#offCount').textContent = officers.length ? `(${officers.length}${m.need ? '/' + m.need : ''})` : '';
     syncKoor();
   };
@@ -871,6 +915,7 @@ function openMisa(m) {
     if (n && !officers.some(x => norm(x) === norm(n))) officers.push(n);
     renderOfficers();
   });
+  f.elements.date.addEventListener('change', renderOfficers);
   f.elements.slot.addEventListener('change', () => {
     const s = MISA_SLOTS.find(x => x.key === f.elements.slot.value);
     if (s?.time) f.elements.time.value = s.time;
@@ -1006,7 +1051,7 @@ function openSmk(g) {
       <label class="fld">Jam layanan<select name="slot">${SMK_SLOTS.map(s => opt(s.key, s.label, g.slot)).join('')}</select></label>
     </div>
     <div class="fld">Petugas per minggu</div>
-    <div class="grid2">${weeks().map((w, i) => `<label class="fld">${h(w)}<select name="off${i}">${petugasOpts(g.officers[i] || '', '— kosong —')}</select></label>`).join('')}</div>
+    <div class="grid2">${weeks().map((w, i) => `<label class="fld">${h(w)}<select name="off${i}">${petugasOpts(g.officers[i] || '', '— kosong —', [], smkDay(g.slot, i))}</select></label>`).join('')}</div>
     <div class="fld">Umat yang dilayani <span id="memCount"></span></div>
     <div id="memList" class="mem-list"></div>
     <div class="grid2" style="grid-template-columns:1fr auto;align-items:end">
@@ -1154,6 +1199,7 @@ function openMenu() {
     S.admin && hasSeedData() && !hasSeed && ['load-seed', '🧾 Muat data Oktober 2026'],
     ONLINE && S.admin && ['users', `👥 Pengguna${S.pendingUsers ? ` (${S.pendingUsers} menunggu)` : ''}`],
     S.admin && ['paroki-settings', '⛪ Pengaturan paroki (nama, jam misa)'],
+    S.admin && ['absences', `🚫 Petugas berhalangan${upcomingAbsences().length ? ` (${upcomingAbsences().length})` : ''}`],
     S.admin && ['sponsor', `🤝 Sponsor${S.sponsor.length ? ` (${activeSponsors().length} tayang)` : ''}`],
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
     ONLINE && ['profile', '👤 Profil saya'],
@@ -1168,11 +1214,12 @@ function openMenu() {
 }
 
 async function menuAction(k) {
-  if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users', 'paroki-settings', 'sponsor'].includes(k)) return;
+  if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users', 'paroki-settings', 'sponsor', 'absences'].includes(k)) return;
   if (k === 'users') return run(openUsers);
   if (k === 'profile') return openProfile();
   if (k === 'paroki-settings') return openParokiForm(P);
   if (k === 'sponsor') return openSponsorList();
+  if (k === 'absences') return openAbsenceList();
   if (k === 'paroki') return S.super && run(openMasterParoki);
   if (k === 'new-month') openNewMonth();
   else if (k === 'settings') openMonthSettings();
@@ -1638,6 +1685,95 @@ async function shrinkImage(file, max, { limit = 200000, photo = false } = {}) {
     if (out.length > limit) throw new Error('Gambar terlalu besar setelah diperkecil, coba gambar lain');
     return out;
   } finally { URL.revokeObjectURL(url); }
+}
+
+/* ---- Petugas berhalangan ---- */
+// Tanggal tugas SMK minggu ke-i (slot rutin → hari misa; slot tambahan → hari Minggu)
+function smkDay(slot, i) {
+  const sun = weekendsOf(S.monthId || '2000-01')[i]?.sun;
+  if (!sun) return '';
+  const sl = slotByKey(slot);
+  return sl ? slotDate(sl, sun) : sun;
+}
+const upcomingAbsences = () => S.absences.filter(a => a.end_date >= todayIso());
+const nextAbsence = pid => upcomingAbsences().filter(a => a.petugas_id === pid).sort((a, b) => a.start_date.localeCompare(b.start_date))[0] || null;
+const petugasName = id => S.petugas.find(p => p.id === id)?.nama || '(petugas dihapus)';
+
+function openAbsenceList() {
+  const t = todayIso();
+  const list = [...S.absences].sort((a, b) => a.start_date.localeCompare(b.start_date) || petugasName(a.petugas_id).localeCompare(petugasName(b.petugas_id)));
+  const now = list.filter(a => a.start_date <= t && a.end_date >= t), soon = list.filter(a => a.start_date > t), past = list.filter(a => a.end_date < t);
+  const row = a => `<div class="urow tap" data-sh="ab-edit" data-id="${h(a.id)}"><div class="mi">
+      <span class="nm">${h(petugasName(a.petugas_id))}</span>
+      <div class="ad">${h(fmtShort(a.start_date))} – ${h(fmtShort(a.end_date))}${a.reason ? ` · ${h(a.reason)}` : ''}</div></div><span class="go">›</span></div>`;
+  const sec = (title, l) => (l.length ? `<div class="sec-title">${title} <span class="count">${l.length}</span></div><div class="list">${l.map(row).join('')}</div>` : '');
+  const body = (sec('Sedang berhalangan', now) + sec('Akan berhalangan', soon)
+      + (past.length ? (S.absenceShowPast ? sec('Sudah lewat', past.reverse()) : `<button type="button" class="link-btn" data-sh="ab-past">Tampilkan ${past.length} yang sudah lewat</button>`) : '')
+      || '<div class="empty-state small">Belum ada petugas yang berhalangan.</div>')
+    + `<button type="button" class="btn primary" data-sh="ab-new">＋ Catat petugas berhalangan</button>
+    <p class="hint">Petugas yang berhalangan tidak bisa dipilih di jadwal pada tanggal itu, dan tab Cek memberi tanda bila ia sudah terlanjur dijadwalkan.</p>`;
+  openSheet('Petugas berhalangan', body, {
+    onClick: b => {
+      if (b.dataset.sh === 'ab-past') { S.absenceShowPast = true; dlg.close(); openAbsenceList(); }
+      else if (b.dataset.sh === 'ab-new') { dlg.close(); openAbsenceForm(); }
+      else if (b.dataset.sh === 'ab-edit') { dlg.close(); openAbsenceForm(S.absences.find(a => a.id === b.dataset.id)); }
+    },
+  });
+}
+
+function openAbsenceForm(a = {}) {
+  const isNew = !a.id;
+  const t = todayIso();
+  a = { id: uid(), petugas_id: '', start_date: t, end_date: t, reason: '', ...a };
+  const opts = S.petugas.filter(p => p.active || p.id === a.petugas_id).sort((x, y) => x.nama.localeCompare(y.nama))
+    .map(p => opt(p.id, p.nama, a.petugas_id)).join('');
+  const body = `
+    <label class="fld">Petugas<select name="petugas_id" required>${opt('', '— pilih petugas —', a.petugas_id || '')}${opts}</select></label>
+    <div class="grid2">
+      <label class="fld">Dari tanggal<input type="date" name="start_date" required value="${h(a.start_date)}"></label>
+      <label class="fld">Sampai tanggal<input type="date" name="end_date" required value="${h(a.end_date)}"></label>
+    </div>
+    <label class="fld">Keterangan (opsional)<input name="reason" maxlength="200" value="${h(a.reason)}" placeholder="mis. sakit, ke luar kota"></label>
+    <div id="abHit"></div>`;
+  openSheet(isNew ? 'Catat berhalangan' : 'Ubah berhalangan', body, {
+    save: async fd => {
+      const row = { ...a, petugas_id: fd.get('petugas_id'), start_date: fd.get('start_date'), end_date: fd.get('end_date'), reason: fd.get('reason').trim() };
+      if (!row.petugas_id) throw new Error('Pilih petugas');
+      if (!row.start_date || !row.end_date) throw new Error('Isi tanggal mulai & selesai');
+      if (row.start_date > row.end_date) throw new Error('Tanggal selesai harus sama atau setelah tanggal mulai');
+      await store.upsert('absences', [row]);
+      S.absences = [...S.absences.filter(x => x.id !== row.id), row];
+      render();
+      const hits = absenceHits(row);
+      toast(hits.length ? `Tersimpan · ${hits.length} tugas bentrok, lihat tab Cek` : 'Tersimpan');
+    },
+    del: isNew ? null : async () => {
+      await store.remove('absences', a.id);
+      S.absences = S.absences.filter(x => x.id !== a.id); render(); toast('Dihapus');
+    },
+  });
+  // Tampilkan tugas yang sudah terjadwal di rentang itu (bulan yang sedang dibuka)
+  const f = $('#sheetForm');
+  const showHits = () => {
+    const hits = absenceHits({ petugas_id: f.elements.petugas_id.value, start_date: f.elements.start_date.value, end_date: f.elements.end_date.value });
+    $('#abHit').innerHTML = hits.length
+      ? `<div class="ad warn">⚠️ Sudah terjadwal di rentang ini: ${hits.map(x => h(x)).join(', ')}. Ganti petugasnya lewat tab Cek.</div>` : '';
+  };
+  ['petugas_id', 'start_date', 'end_date'].forEach(k => f.elements[k].addEventListener('change', () => {
+    if (k === 'start_date' && f.elements.end_date.value < f.elements.start_date.value) f.elements.end_date.value = f.elements.start_date.value;
+    showHits();
+  }));
+  showHits();
+}
+// Tugas (bulan aktif) milik petugas pada rentang berhalangan
+function absenceHits(a) {
+  const p = S.petugas.find(x => x.id === a.petugas_id);
+  if (!p || !a.start_date || !a.end_date) return [];
+  const inR = d => d && d >= a.start_date && d <= a.end_date;
+  const k = norm(p.nama), out = [];
+  for (const m of S.misa) if (inR(m.date) && m.officers.some(n => norm(n) === k)) out.push(`${m.slot === 'LAIN' ? m.title : m.slot} ${fmtShort(m.date)}`);
+  for (const g of S.smk) g.officers.forEach((n, i) => { if (norm(n) === k && inR(smkDay(g.slot, i))) out.push(`SMK grup ${g.no} ${fmtShort(smkDay(g.slot, i))}`); });
+  return out;
 }
 
 /* ---- Sponsor ---- */
