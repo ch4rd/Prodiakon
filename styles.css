@@ -269,3 +269,5 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .chip small { color: var(--muted); font-weight: 400; margin-left: 2px; }
 .chip.add { background: #fff; border: 1px dashed var(--line); color: var(--brand-2); }
 .c-head .t { font-weight: 700; }
+.chip.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; background: #fff; border: 1px solid var(--line); }
+.chip.check input { margin: 0; }
