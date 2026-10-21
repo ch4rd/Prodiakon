@@ -8,9 +8,10 @@ const ONLINE = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
 const DEFAULT_PAROKI = {
   id: 'local', slug: 'albertus', nama: 'St. Albertus', kota: 'Harapan Indah, Bekasi', active: true,
   misa_slots: [
-    { key: 'M1', day: 6, time: '17.30' }, { key: 'M2', day: 0, time: '06.00' },
-    { key: 'M3', day: 0, time: '08.30' }, { key: 'M4', day: 0, time: '17.30' },
+    { key: 'M1', day: 6, time: '17.30', need: 14 }, { key: 'M2', day: 0, time: '06.00', need: 10 },
+    { key: 'M3', day: 0, time: '08.30', need: 20 }, { key: 'M4', day: 0, time: '17.30', need: 26 },
   ],
+  auto_month: true,
   smk_extra: [{ key: 'PRIVAT', label: 'Privat (petugas tetap)' }, { key: 'JUMAT', label: 'Jumat (Suster)' }],
 };
 let P = DEFAULT_PAROKI;      // paroki aktif
@@ -106,6 +107,11 @@ class LocalStore {
     const rows = this.read()[kind] || [];
     return structuredClone(monthId ? rows.filter(r => r.month_id === monthId) : rows);
   }
+  async insert(kind, rows) {
+    const d = this.read();
+    if (rows.some(r => d[kind].some(x => x.id === r.id))) throw new Error('duplicate');
+    d[kind].push(...rows); this.write(d);
+  }
   async upsert(kind, rows) {
     const d = this.read(); const arr = d[kind];
     for (const r of rows) {
@@ -133,6 +139,10 @@ class SupaStore {
     const { data, error } = await q;
     if (error) throw error;
     return data;
+  }
+  async insert(kind, rows) {
+    const { error } = await this.sb.from(kind).insert(rows.map(r => ({ ...r, paroki_id: P.id })));
+    if (error) throw error;
   }
   async upsert(kind, rows) {
     if (!rows.length) return;
@@ -920,6 +930,7 @@ function openMisa(m) {
     const s = MISA_SLOTS.find(x => x.key === f.elements.slot.value);
     if (s?.time) f.elements.time.value = s.time;
     if (s && s.key !== 'LAIN' && !f.elements.title.value) f.elements.title.value = 'Minggu Biasa';
+    if (s?.need && !Number(f.elements.need.value)) f.elements.need.value = s.need; // jumlah petugas default slot
   });
   renderOfficers();
 }
@@ -1125,41 +1136,74 @@ function openSmk(g) {
 }
 
 /* ---- Bulan ---- */
+const AUTO_MONTH_DAY = 20; // mulai tanggal ini, bulan depan dibuat otomatis (admin)
+const nextYm = ym => { const [y, m] = ym.split('-').map(Number); return iso(new Date(y, m, 1)).slice(0, 7); };
+
+// Buat bulan ym: misa rutin tiap akhir pekan (jam & jumlah petugas dari pengaturan paroki),
+// grup SMK disalin dari bulan copyFrom (petugas dikosongkan, kecuali slot tetap/privat).
+async function createMonth(ym, { gen = true, copyFrom = null, notesFrom = '', insertOnly = false } = {}) {
+  const we = weekendsOf(ym);
+  const month = { id: ym, weeks: we.map(w => w.label), notes: notesFrom };
+  const misa = [], groups = [];
+  if (gen) {
+    for (const w of we) {
+      for (const k of REGULAR) {
+        const sl = slotByKey(k);
+        misa.push({
+          id: uid(), month_id: ym, date: slotDate(sl, w.sun), slot: k, title: 'Minggu Biasa',
+          time: sl.time, place: '', color: 'hijau', need: Number(sl.need) || 0, officers: [], coordinator: '', note: '',
+        });
+      }
+    }
+  }
+  if (copyFrom) {
+    const src = copyFrom === S.monthId ? S.smk : await store.list('smk_groups', copyFrom);
+    for (const g of src) {
+      const fixed = !REGULAR.includes(g.slot);
+      const { updated_at, ...rest } = structuredClone(g);
+      groups.push({ ...rest, id: uid(), month_id: ym, officers: we.map(() => (fixed ? g.officers[0] || '' : '')) });
+    }
+  }
+  if (insertOnly) await store.insert('months', [month]); // gagal bila bulan itu sudah dibuat admin lain
+  else await store.upsert('months', [month]);
+  await store.upsert('misa', misa);
+  await store.upsert('smk_groups', groups);
+  return { misa: misa.length, groups: groups.length };
+}
+
+// Admin membuka app pada/after tanggal 20 → bulan depan dibuat otomatis bila belum ada
+async function autoNextMonth() {
+  if (!S.admin || P.auto_month === false || !REGULAR.length || !S.months.length) return; // bulan pertama dibuat admin sendiri
+  const today = iso(new Date());
+  if (Number(today.slice(8, 10)) < AUTO_MONTH_DAY) return;
+  const ym = nextYm(today.slice(0, 7));
+  if (S.months.some(m => m.id === ym)) return;
+  const src = S.months.find(m => m.id === today.slice(0, 7)) || S.months[0] || null;
+  try {
+    const r = await createMonth(ym, { copyFrom: src?.id || null, notesFrom: src?.notes || '', insertOnly: true });
+    S.months = (await store.list('months')).sort((a, b) => b.id.localeCompare(a.id));
+    render();
+    toast(`Jadwal ${monthName(ym)} dibuat otomatis: ${r.misa} misa rutin${r.groups ? `, ${r.groups} grup SMK` : ''}`);
+  } catch (e) {
+    if (!/duplicate|23505|already exists/i.test(String(e.message || e.code || e))) console.warn('autoNextMonth', e);
+  }
+}
+
 function openNewMonth() {
   const base = S.monthId ? parseD(S.monthId + '-01') : new Date();
   const next = new Date(base.getFullYear(), base.getMonth() + (S.monthId ? 1 : 0), 1);
+  const slotTx = MISA_SLOTS.filter(x => x.key !== 'LAIN').map(x => `${x.key} ${x.label}${x.need ? ` (${x.need} petugas)` : ''}`).join(', ');
   const body = `
     <label class="fld">Bulan<input type="month" name="ym" required value="${iso(next).slice(0, 7)}"></label>
     ${S.monthId ? `<label><input type="checkbox" name="copy" checked> Salin daftar grup & umat SMK dari ${h(monthName(S.monthId))} (petugas dikosongkan, kecuali privat/Jumat)</label>` : ''}
-    <label><input type="checkbox" name="gen" checked> Buat slot misa rutin M1–M4 untuk tiap akhir pekan</label>
-    <p class="hint">Minggu dihitung dari hari Minggu di bulan tersebut.</p>`;
+    <label><input type="checkbox" name="gen" checked> Buat misa rutin tiap akhir pekan</label>
+    <p class="hint">${h(slotTx)}. Jam & jumlah petugas diatur di Menu ⋮ → Pengaturan paroki.</p>`;
   openSheet('Bulan baru', body, {
     saveLabel: 'Buat',
     save: async fd => {
       const ym = fd.get('ym');
       if (S.months.some(m => m.id === ym)) { toast('Bulan itu sudah ada'); return false; }
-      const we = weekendsOf(ym);
-      const month = { id: ym, weeks: we.map(w => w.label), notes: curMonth()?.notes || '' };
-      const misa = [], groups = [];
-      if (fd.get('gen')) {
-        for (const w of we) {
-          for (const s of REGULAR) {
-            misa.push({
-              id: uid(), month_id: ym, date: slotDate(slotByKey(s), w.sun), slot: s, title: 'Minggu Biasa',
-              time: slotByKey(s).time, place: '', color: 'hijau', need: 0, officers: [], coordinator: '', note: '',
-            });
-          }
-        }
-      }
-      if (fd.get('copy')) {
-        for (const g of S.smk) {
-          const fixed = !REGULAR.includes(g.slot);
-          groups.push({ ...structuredClone(g), id: uid(), month_id: ym, officers: we.map(() => (fixed ? g.officers[0] || '' : '')) });
-        }
-      }
-      await store.upsert('months', [month]);
-      await store.upsert('misa', misa);
-      await store.upsert('smk_groups', groups);
+      await createMonth(ym, { gen: !!fd.get('gen'), copyFrom: fd.get('copy') ? S.monthId : null, notesFrom: curMonth()?.notes || '' });
       S.monthId = ym; lsSet('prodiakon.month', ym);
       await loadMonths(); toast(`${monthName(ym)} dibuat`);
     },
@@ -1589,17 +1633,18 @@ function openProfile() {
 
 /* ---- Paroki ---- */
 const HARI = { minggu: 0, senin: 1, selasa: 2, rabu: 3, kamis: 4, jumat: 5, "jum'at": 5, sabtu: 6 };
-const slotsToText = p => (p.misa_slots || []).map(x => `${x.key} | ${DAYS[x.day]} | ${x.time}`).join('\n');
+const slotsToText = p => (p.misa_slots || []).map(x => `${x.key} | ${DAYS[x.day]} | ${x.time}${x.need ? ` | ${x.need}` : ''}`).join('\n');
 const extraToText = p => (p.smk_extra || []).map(x => `${x.key} | ${x.label}`).join('\n');
 function parseSlots(text) {
   const out = [];
   for (const [i, line] of String(text).split('\n').entries()) {
     if (!line.trim()) continue;
-    const [key, hari, time] = line.split('|').map(x => (x || '').trim());
+    const [key, hari, time, needTx = ''] = line.split('|').map(x => (x || '').trim());
     const day = HARI[norm(hari)];
-    if (!key || day === undefined || !/^\d{1,2}[.:]\d{2}$/.test(time)) throw new Error(`Jam misa baris ${i + 1} tidak sesuai format "M1 | Sabtu | 17.30"`);
+    if (!key || day === undefined || !/^\d{1,2}[.:]\d{2}$/.test(time)) throw new Error(`Jam misa baris ${i + 1} tidak sesuai format "M1 | Sabtu | 17.30 | 14"`);
+    if (needTx && !/^\d{1,3}$/.test(needTx)) throw new Error(`Jumlah petugas baris ${i + 1} harus angka`);
     if (key.toUpperCase() === 'LAIN') throw new Error('Kode "LAIN" sudah dipakai untuk misa khusus');
-    out.push({ key: key.toUpperCase(), day, time: time.replace(':', '.') });
+    out.push({ key: key.toUpperCase(), day, time: time.replace(':', '.'), need: Number(needTx) || 0 });
   }
   if (new Set(out.map(x => x.key)).size !== out.length) throw new Error('Kode jam misa ada yang dobel');
   return out;
@@ -1633,16 +1678,18 @@ function openParokiForm(p) {
     ${S.super ? `<label class="fld">Kode link (huruf kecil, angka, tanda -)<input name="slug" required value="${h(p.slug)}" placeholder="albertus" pattern="[a-z0-9\\-]+"></label>
       <label><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Aktif (bisa dipilih saat daftar)</label>` : ''}
     ${p.slug ? `<p class="hint">Link paroki: <b>${h(parokiLink(p))}</b></p>` : ''}
-    <label class="fld">Jam misa rutin (satu per baris: Kode | Hari | Jam)<textarea name="slots" rows="5">${h(slotsToText(p))}</textarea></label>
+    <label class="fld">Jam misa rutin (satu per baris: Kode | Hari | Jam | Jumlah petugas)<textarea name="slots" rows="5">${h(slotsToText(p))}</textarea></label>
+    <label><input type="checkbox" name="auto_month" ${p.auto_month !== false ? 'checked' : ''}> Buat jadwal bulan depan otomatis (mulai tanggal ${AUTO_MONTH_DAY} tiap bulan, saat admin membuka app)</label>
     <label class="fld">Slot SMK tambahan di luar jam misa (Kode | Nama)<textarea name="extra" rows="3">${h(extraToText(p))}</textarea></label>
-    <p class="hint">Contoh jam misa: <code>M1 | Sabtu | 17.30</code>. Mengubah kode jam misa tidak mengubah jadwal yang sudah dibuat.</p>`;
+    <p class="hint">Contoh: <code>M1 | Sabtu | 17.30 | 14</code> (14 = jumlah petugas dibutuhkan, boleh dikosongkan).
+      Mengubah jam misa tidak mengubah jadwal yang sudah dibuat; berlaku untuk bulan berikutnya.</p>`;
   openSheet(isNew ? 'Paroki baru' : `Pengaturan ${p.nama}`, body, {
     save: async fd => {
       const row = {
         ...(p.id ? { id: p.id } : {}), nama: fd.get('nama').trim(), kota: fd.get('kota').trim(),
         slug: S.super ? fd.get('slug').trim().toLowerCase() : p.slug,
         active: S.super ? !!fd.get('active') : p.active,
-        misa_slots: parseSlots(fd.get('slots')), smk_extra: parseExtra(fd.get('extra')), logo,
+        misa_slots: parseSlots(fd.get('slots')), smk_extra: parseExtra(fd.get('extra')), auto_month: !!fd.get('auto_month'), logo,
       };
       if (!row.nama) throw new Error('Nama paroki wajib diisi');
       if (!/^[a-z0-9-]+$/.test(row.slug)) throw new Error('Kode link hanya huruf kecil, angka, dan tanda -');
@@ -1985,6 +2032,7 @@ async function showApp() {
   }
   $('#login').hidden = true; $('#app').hidden = false;
   await run(loadMonths);
+  await autoNextMonth();
   refreshPush();
   if (ONLINE && S.admin) {
     const users = await store.listUsers().catch(() => []);

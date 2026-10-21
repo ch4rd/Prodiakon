@@ -13,13 +13,15 @@ create table if not exists public.paroki (
   active     boolean not null default true,
   created_at timestamptz not null default now()
 );
+-- Buat jadwal bulan depan otomatis (mulai tgl 20, saat admin membuka app)
+alter table public.paroki add column if not exists auto_month boolean not null default true;
 
 insert into public.paroki (slug, nama, kota, misa_slots, smk_extra) values (
   'albertus', 'St. Albertus', 'Harapan Indah, Bekasi',
-  '[{"key":"M1","day":6,"time":"17.30","label":"Sabtu 17.30"},
-    {"key":"M2","day":0,"time":"06.00","label":"Minggu 06.00"},
-    {"key":"M3","day":0,"time":"08.30","label":"Minggu 08.30"},
-    {"key":"M4","day":0,"time":"17.30","label":"Minggu 17.30"}]',
+  '[{"key":"M1","day":6,"time":"17.30","need":14},
+    {"key":"M2","day":0,"time":"06.00","need":10},
+    {"key":"M3","day":0,"time":"08.30","need":20},
+    {"key":"M4","day":0,"time":"17.30","need":26}]',
   '[{"key":"PRIVAT","label":"Privat (petugas tetap)"},{"key":"JUMAT","label":"Jumat (Suster)"}]'
 ) on conflict (slug) do nothing;
 
