@@ -291,3 +291,11 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 /* Poster misa */
 .poster-prev { width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); display: block; }
 .poster-btns { flex-wrap: wrap; }
+/* Kolom tanggal/jam: di Safari iOS lebar bawaannya tidak bisa dipersempit → paksa ikut kolom */
+.fld input[type="date"], .fld input[type="time"], .fld input[type="month"] {
+  -webkit-appearance: none; appearance: none; display: block; min-width: 0; max-width: 100%;
+  min-height: 42px; line-height: 1.2; text-align: left;
+}
+.fld input::-webkit-date-and-time-value { text-align: left; margin: 0; }
+.grid2 > .fld { min-width: 0; overflow: hidden; }
+.date-row { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }

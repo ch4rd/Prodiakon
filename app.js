@@ -939,19 +939,17 @@ function openMisa(m) {
     color: 'hijau', need: 0, officers: [], coordinator: '', note: '',
   };
   const body = `
-    <div class="grid2">
+    <label class="fld">Jenis misa<select name="slot">${MISA_SLOTS.map(s => opt(s.key, s.key === 'LAIN' ? 'Misa khusus / lainnya' : `${s.key} · ${s.label}`, m.slot)).join('')}</select></label>
+    <div class="grid2 date-row">
       <label class="fld">Tanggal<input type="date" name="date" required value="${h(m.date)}"></label>
-      <label class="fld">Jenis<select name="slot">${MISA_SLOTS.map(s => opt(s.key, s.key === 'LAIN' ? 'Misa khusus/lain' : `${s.key} · ${s.label}`, m.slot)).join('')}</select></label>
+      <label class="fld">Jam<input name="time" value="${h(m.time)}" placeholder="17.30" inputmode="decimal"></label>
     </div>
     <label class="fld">Nama misa / perayaan<input name="title" value="${h(m.title)}" placeholder="Minggu Biasa"></label>
     <div class="grid2">
-      <label class="fld">Jam<input name="time" value="${h(m.time)}" placeholder="17.30"></label>
       <label class="fld">Tempat<input name="place" value="${h(m.place)}" placeholder="Gereja"></label>
-    </div>
-    <div class="grid2">
       <label class="fld">Warna liturgi<select name="color">${Object.entries(COLORS).map(([k, v]) => opt(k, v[0], m.color)).join('')}</select></label>
-      <label class="fld">Jumlah dibutuhkan<input type="number" min="0" name="need" value="${m.need || 0}"></label>
     </div>
+    <label class="fld">Jumlah petugas dibutuhkan<input type="number" min="0" name="need" value="${m.need || 0}" inputmode="numeric"></label>
     <div class="fld">Petugas <span id="offCount"></span></div>
     <div class="chips" id="offChips"></div>
     <div id="offAbsent"></div>
