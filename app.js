@@ -2338,12 +2338,96 @@ async function reportHantaran(ym) {
   doc.save(`hantaran-${ym}.pdf`);
 }
 
+// Ringkasan kehadiran bulan ym dari jadwal misa (yang sudah lewat / hari ini) + catatan absen
+function attendanceSummary(misa, att) {
+  const t = todayIso();
+  const done = misa.filter(m => m.date <= t).sort(cmpMisa);
+  const perMisa = done.map(m => {
+    const at = att.filter(a => a.misa_id === m.id);
+    const replaced = at.filter(a => !a.present && /^diganti /.test(a.note || ''));
+    const present = m.officers.filter(n => at.find(a => norm(a.petugas) === norm(n))?.present);
+    const absent = m.officers.filter(n => at.some(a => norm(a.petugas) === norm(n) && !a.present));
+    return { m, checked: at.length > 0, present, absent, replaced, total: m.officers.length }; // yang diganti sudah digantikan di jadwal
+  });
+  const per = new Map();
+  const row = n => { const k = norm(n); if (!per.has(k)) per.set(k, { nama: n, tugas: 0, hadir: 0, tidak: 0, diganti: 0, pengganti: 0, belum: 0 }); return per.get(k); };
+  for (const x of perMisa) {
+    for (const n of x.m.officers) {
+      const r = row(n), a = att.find(y => y.misa_id === x.m.id && norm(y.petugas) === norm(n));
+      if (a?.substitute_for) { r.pengganti++; r.hadir++; continue; } // datang sebagai pengganti (bukan jadwal awal)
+      r.tugas++;
+      if (!x.checked) r.belum++; else if (a?.present) r.hadir++; else r.tidak++;
+    }
+    for (const a of x.replaced) { const r = row(a.petugas); r.tugas++; r.tidak++; r.diganti++; }
+  }
+  return { perMisa, perPetugas: [...per.values()].sort((a, b) => b.tidak - a.tidak || b.diganti - a.diganti || a.nama.localeCompare(b.nama)) };
+}
+
+// 3) Rekap kehadiran (admin): per misa & per petugas
+async function reportKehadiran(ym) {
+  const jsPDF = await loadPdfLib();
+  const { misa } = await reportData(ym);
+  const att = ym === S.monthId ? S.attendance : await store.list('attendance', ym).catch(() => []);
+  const { perMisa, perPetugas } = attendanceSummary(misa, att);
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const GREEN = [146, 208, 80], WARN = [255, 235, 156], BAD = [252, 213, 180];
+  const checked = perMisa.filter(x => x.checked);
+  const totHadir = checked.reduce((a, x) => a + x.present.length, 0), totTugas = checked.reduce((a, x) => a + x.total, 0);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(0);
+  doc.text('REKAP KEHADIRAN PETUGAS PRODIAKON', 10, 13);
+  doc.text(monthShort(ym), doc.internal.pageSize.getWidth() - 10, 13, { align: 'right' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text(`Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''} · data sampai ${fmtShort(todayIso())}`, 10, 18);
+  doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+  doc.text(`${perMisa.length} misa · ${checked.length} sudah diabsen · ${perMisa.length - checked.length} belum diabsen · kehadiran ${totTugas ? Math.round(100 * totHadir / totTugas) : 0}% (${totHadir}/${totTugas})`, 10, 24);
+
+  doc.autoTable({
+    startY: 28, theme: 'grid', margin: { left: 10, right: 10 },
+    head: [['TANGGAL', 'MISA', 'KOORDINATOR', 'HADIR', 'TIDAK HADIR', 'DIGANTI OLEH', 'STATUS']],
+    body: perMisa.map(x => [
+      fmtShort(x.m.date), x.m.slot === 'LAIN' ? (x.m.title || 'Misa') : `${x.m.slot} ${slotLabel(x.m.slot)}`, x.m.coordinator || '-',
+      x.checked ? `${x.present.length}/${x.total}` : '-',
+      x.checked ? [...x.absent, ...x.replaced.map(a => a.petugas)].join(', ') || '-' : '-',
+      x.replaced.map(a => `${a.petugas} > ${a.note.replace(/^diganti /, '')}`).join(', ') || '-',
+      x.checked ? (x.absent.length || x.replaced.length ? 'Ada yang tidak hadir' : 'Lengkap') : 'Belum diabsen',
+    ]),
+    styles: { fontSize: 8, cellPadding: 1, lineColor: [150, 150, 150], lineWidth: 0.1, textColor: 20, valign: 'middle' },
+    headStyles: { fillColor: GREEN, textColor: 0, fontStyle: 'bold' },
+    columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 42 }, 2: { cellWidth: 30 }, 3: { cellWidth: 16, halign: 'center' }, 6: { cellWidth: 32 } },
+    didParseCell: d => {
+      if (d.section !== 'body' || d.column.index !== 6) return;
+      if (d.cell.raw === 'Belum diabsen') d.cell.styles.fillColor = WARN;
+      else if (d.cell.raw !== 'Lengkap') d.cell.styles.fillColor = BAD;
+    },
+  });
+
+  doc.addPage();
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.text('REKAP PER PETUGAS', 10, 13);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text('Tugas = jadwal awal. Pengganti = datang menggantikan petugas lain. Diurutkan dari yang paling sering tidak hadir.', 10, 18);
+  doc.autoTable({
+    startY: 22, theme: 'grid', margin: { left: 10, right: 10 },
+    head: [['NO', 'NAMA PETUGAS', 'TUGAS', 'HADIR', 'TIDAK HADIR', 'DIGANTI', 'JADI PENGGANTI', 'BELUM DIABSEN', '% HADIR']],
+    body: perPetugas.map((r, i) => {
+      const dinilai = r.tugas - r.belum;
+      return [String(i + 1), r.nama, r.tugas, r.hadir, r.tidak, r.diganti, r.pengganti, r.belum, dinilai ? `${Math.round(100 * (r.hadir - r.pengganti) / dinilai)}%` : '-'];
+    }),
+    styles: { fontSize: 8, cellPadding: 1, halign: 'center', lineColor: [150, 150, 150], lineWidth: 0.1, textColor: 20 },
+    headStyles: { fillColor: GREEN, textColor: 0, fontStyle: 'bold' },
+    columnStyles: { 0: { cellWidth: 10 }, 1: { halign: 'left', cellWidth: 60 } },
+    didParseCell: d => { if (d.section === 'body' && d.column.index === 4 && Number(d.cell.raw) > 0) { d.cell.styles.fillColor = BAD; d.cell.styles.fontStyle = 'bold'; } },
+  });
+  pdfFooter(doc);
+  doc.save(`rekap-kehadiran-${ym}.pdf`);
+}
+
 function openReports() {
   const body = `
     <label class="fld">Bulan<select name="ym">${S.months.map(m => opt(m.id, monthName(m.id), S.monthId)).join('')}</select></label>
     <div class="menu-list">
       <button type="button" data-sh="rp-jadwal">📅 Jadwal tugas prodiakon (per jam misa, per minggu)</button>
       <button type="button" data-sh="rp-hantaran">🕊️ Daftar petugas layanan hantaran (dengan alamat umat)</button>
+      ${S.admin ? '<button type="button" data-sh="rp-hadir">✅ Rekap kehadiran petugas (per misa & per petugas)</button>' : ''}
     </div>
     <p class="hint">PDF A4 landscape, siap cetak atau dikirim. Laporan hantaran memuat alamat & nomor umat — bagikan hanya ke petugas.</p>`;
   openSheet('Laporan (PDF)', body, {
@@ -2351,6 +2435,7 @@ function openReports() {
       const ym = $('#sheetForm').elements.ym.value;
       if (b.dataset.sh === 'rp-jadwal') run(async () => { toast('Menyiapkan PDF…'); await reportJadwal(ym); });
       else if (b.dataset.sh === 'rp-hantaran') run(async () => { toast('Menyiapkan PDF…'); await reportHantaran(ym); });
+      else if (b.dataset.sh === 'rp-hadir' && S.admin) run(async () => { toast('Menyiapkan PDF…'); await reportKehadiran(ym); });
     },
   });
 }
