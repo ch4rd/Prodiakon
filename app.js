@@ -99,7 +99,7 @@ function download(name, text, type) {
 class LocalStore {
   constructor() { this.key = 'prodiakon.data.v1'; }
   read() {
-    const empty = { months: [], misa: [], smk_groups: [], umat: [], petugas: [], sponsor: [], absences: [] };
+    const empty = { months: [], misa: [], smk_groups: [], umat: [], petugas: [], sponsor: [], absences: [], wilayah: [], lingkungan: [] };
     try { return { ...empty, ...JSON.parse(lsGet(this.key) || '{}') }; } catch { return empty; }
   }
   write(d) { localStorage.setItem(this.key, JSON.stringify(d)); }
@@ -239,6 +239,7 @@ const S = {
   userId: null, pendingUsers: 0, me: null, pickName: false,
   petugas: [], petugasView: 'tugas', petugasQ: '',
   absences: [], absenceShowPast: false,
+  wilayah: [], lingkungan: [], smkWil: '',
   super: false, parokiList: [], sponsor: [], sponsorAt: Math.floor(Math.random() * 1000),
 };
 // Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
@@ -296,6 +297,8 @@ function cmpMisa(a, b) {
 async function loadMonths() {
   S.sponsor = await store.list('sponsor').catch(() => []);
   S.absences = await store.list('absences').catch(() => []);
+  S.wilayah = await store.list('wilayah').catch(() => []);
+  S.lingkungan = await store.list('lingkungan').catch(() => []);
   S.months = (await store.list('months')).sort((a, b) => b.id.localeCompare(a.id));
   const saved = lsGet('prodiakon.month');
   const now = iso(new Date()).slice(0, 7);
@@ -312,6 +315,8 @@ async function loadMonth() {
     if (S.admin) {
       const n = await syncPetugasFromSchedule();
       if (n) toast(`${n} nama petugas dari jadwal dimasukkan ke Master petugas`);
+      const nl = await run(syncLingkungan);
+      if (nl) toast(`${nl} lingkungan dari data umat dimasukkan ke Master lingkungan`);
     }
     if (S.admin && S.smk.some(x => x.members.some(y => !y.umat_id))) {
       const n = await linkLegacy(S.smk);
@@ -408,22 +413,28 @@ function misaCard(m, highlight) {
 
 /* ---- SMK ---- */
 function renderSmk(main) {
-  const v = S.smkView === 'umat' ? 'umat' : 'grup';
+  const v = ['umat', 'wilayah'].includes(S.smkView) ? S.smkView : 'grup';
   const bar = `<div class="bar">
     <button class="pill ${v === 'grup' ? 'on' : ''}" data-act="smk-view" data-k="grup">Grup antaran</button>
     <button class="pill ${v === 'umat' ? 'on' : ''}" data-act="smk-view" data-k="umat">Master umat (${S.umat.filter(u => u.active).length})</button>
+    <button class="pill ${v === 'wilayah' ? 'on' : ''}" data-act="smk-view" data-k="wilayah">Wilayah & lingkungan (${S.wilayah.length})</button>
   </div>`;
   if (v === 'umat') return renderUmat(main, bar);
-  main.innerHTML = bar + `<input class="search" id="smkQ" type="search" placeholder="Cari umat, petugas, lingkungan, alamat…" value="${h(S.smkQ)}">
+  if (v === 'wilayah') return renderWilayah(main, bar);
+  const wilOpts = sortedWilayah().map(w => opt(w.id, w.nama, S.smkWil)).join('');
+  main.innerHTML = bar + `${S.wilayah.length ? `<select class="search" id="smkWil">${opt('', 'Semua wilayah', S.smkWil)}${wilOpts}</select>` : ''}
+    <input class="search" id="smkQ" type="search" placeholder="Cari umat, petugas, lingkungan, alamat…" value="${h(S.smkQ)}">
     <div id="smkList"></div>
     ${curMonth()?.notes ? `<div class="notes-box"><b>Catatan</b>\n${h(curMonth().notes)}</div>` : ''}`;
   $('#smkQ').addEventListener('input', e => { S.smkQ = e.target.value; renderSmkList(); });
+  $('#smkWil')?.addEventListener('change', e => { S.smkWil = e.target.value; renderSmkList(); });
   renderSmkList();
 }
 
 function renderSmkList() {
   const q = norm(S.smkQ);
-  const match = g => !q || norm([g.no, ...g.officers, ...mem(g).flatMap(m => [m.nama, m.lingkungan, m.alamat, m.telp])].join(' ')).includes(q);
+  const match = g => (!S.smkWil || groupWilayah(g).some(w => w.id === S.smkWil))
+    && (!q || norm([g.no, ...g.officers, ...mem(g).flatMap(m => [m.nama, m.lingkungan, wilayahOfLing(m.lingkungan)?.nama, m.alamat, m.telp])].join(' ')).includes(q));
   let html = '';
   for (const s of SMK_SLOTS) {
     const groups = S.smk.filter(g => g.slot === s.key && match(g));
@@ -453,6 +464,7 @@ function smkCard(g) {
     <div class="c-head">
       <span class="badge">${h(g.no)}</span>
       <span class="sub">${mem(g).length} umat</span>
+      ${groupWilayah(g).map(w => `<span class="tag wil">${h(w.nama)}</span>`).join('')}
       ${S.admin ? `<button class="btn small" style="margin-left:auto" data-act="edit-smk" data-id="${h(g.id)}">Ubah</button>` : ''}
     </div>
     <div class="c-body"><div class="weeks">${wk}</div>${memHtml || '<span class="count">Belum ada umat</span>'}</div>
@@ -755,6 +767,10 @@ function buildIssues() {
     if (!p) out.push(['❗', `Petugas "${n}" ada di jadwal tapi tidak ada di Master petugas.`, `petugas-new:${n}`]);
     else if (!p.active) out.push(['⚠️', `Petugas ${p.nama} sudah tidak aktif tapi masih ada di jadwal bulan ini.`, `person:${norm(p.nama)}`]);
   }
+  if (S.lingkungan.length) {
+    for (const l of S.lingkungan) if (l.active && !S.wilayah.some(w => w.id === l.wilayah_id)) out.push(['ℹ️', `Lingkungan ${l.nama} belum dimasukkan ke wilayah mana pun.`, `ling:${l.id}`]);
+    for (const u of S.umat) if (u.active && u.lingkungan && !lingOf(u.lingkungan)) out.push(['⚠️', `Umat ${u.nama}: lingkungan "${u.lingkungan}" tidak ada di Master lingkungan.`, `umat:${u.id}`]);
+  }
   const asg = umatAssignments();
   for (const u of S.umat) {
     const gs = asg.get(u.id) || [];
@@ -791,6 +807,7 @@ function goIssue(link) {
   if (type === 'misa') return openMisa(S.misa.find(m => m.id === v));
   if (type === 'smk') return openSmk(S.smk.find(g => g.id === v));
   if (type === 'umat') return openUmat(UM.get(v));
+  if (type === 'ling') return openLingkunganForm(S.lingkungan.find(l => l.id === v));
   if (type === 'petugas-new') { openPetugasForm(); $('#sheetForm').elements.nama.value = v; return; }
   if (type === 'person') { S.tab = 'petugas'; S.petugasView = 'tugas'; S.person = v; lsSet('prodiakon.tab', S.tab); render(); window.scrollTo(0, 0); return; }
   if (type === 'misa-new') {
@@ -973,7 +990,7 @@ function umatRow(u, groups = []) {
     ? groups.map(g => `<span class="tag">Grup ${h(g.no)} · ${h(smkSlotLabel(g.slot))}</span>`).join('')
     : (u.active && S.monthId ? '<span class="tag warn">Belum masuk grup bulan ini</span>' : '');
   return `<div class="umat${S.admin ? ' tap' : ''}" ${S.admin ? `data-act="edit-umat" data-id="${h(u.id)}"` : ''}>
-    <div><span class="nm">${h(u.nama)}</span>${u.lingkungan ? `<span class="ln">${h(u.lingkungan)}</span>` : ''}</div>
+    <div><span class="nm">${h(u.nama)}</span>${u.lingkungan ? `<span class="ln">${h(u.lingkungan)}</span>` : ''}${wilayahOfLing(u.lingkungan) ? ` <span class="tag wil">${h(wilayahOfLing(u.lingkungan).nama)}</span>` : ''}</div>
     ${u.alamat ? `<div class="ad">📍 ${h(u.alamat)}</div>` : ''}
     ${u.telp ? `<div class="phones">${phoneLinks(u.telp)}</div>` : ''}
     ${u.note ? `<div class="ad">📝 ${h(u.note)}</div>` : ''}
@@ -987,7 +1004,7 @@ function openUmat(u) {
   const body = `
     <label class="fld">Nama<input name="nama" required value="${h(u.nama)}" placeholder="mis. Ibu Maria (2 SMK)"></label>
     <div class="grid2">
-      <label class="fld">Lingkungan<input name="lingkungan" value="${h(u.lingkungan)}"></label>
+      <label class="fld">Lingkungan${S.lingkungan.length ? `<select name="lingkungan">${lingkunganOpts(u.lingkungan)}</select>` : `<input name="lingkungan" value="${h(u.lingkungan)}">`}</label>
       <label class="fld">Telp / HP<input name="telp" value="${h(u.telp)}" inputmode="tel" placeholder="0812… / 0813…"></label>
     </div>
     <label class="fld">Alamat<input name="alamat" value="${h(u.alamat)}"></label>
@@ -1393,6 +1410,10 @@ $('#main').addEventListener('click', e => {
     lsSet('prodiakon.myName', n); S.pickName = false; render(); return;
   }
   if (act === 'edit-umat') { openUmat(UM.get(id)); return; }
+  if (act === 'edit-wil') { if (S.admin) openWilayahForm(S.wilayah.find(w => w.id === id)); return; }
+  if (act === 'edit-ling') { if (S.admin) openLingkunganForm(S.lingkungan.find(l => l.id === id)); return; }
+  if (act === 'new-wil') { if (S.admin) openWilayahForm(); return; }
+  if (act === 'new-ling') { if (S.admin) openLingkunganForm(k ? { wilayah_id: k } : undefined); return; }
   if (act === 'misa-filter') { S.misaFilter = k; render(); }
   else if (act === 'edit-misa') openMisa(S.misa.find(m => m.id === id));
   else if (act === 'edit-smk') openSmk(S.smk.find(g => g.id === id));
@@ -1417,7 +1438,7 @@ $('#menuBtn').addEventListener('click', openMenu);
 $('#fab').addEventListener('click', () => {
   if (!S.admin) return;
   if (S.tab === 'petugas') openPetugasForm();
-  else if (S.tab === 'smk') (S.smkView === 'umat' ? openUmat() : openSmk());
+  else if (S.tab === 'smk') (S.smkView === 'umat' ? openUmat() : S.smkView === 'wilayah' ? openLingkunganForm() : openSmk());
   else openMisa();
 });
 document.addEventListener('visibilitychange', () => {
@@ -1732,6 +1753,122 @@ async function shrinkImage(file, max, { limit = 200000, photo = false } = {}) {
     if (out.length > limit) throw new Error('Gambar terlalu besar setelah diperkecil, coba gambar lain');
     return out;
   } finally { URL.revokeObjectURL(url); }
+}
+
+/* ---- Wilayah & lingkungan ---- */
+const sortedWilayah = () => [...S.wilayah].sort((a, b) => (a.urutan ?? 0) - (b.urutan ?? 0) || a.nama.localeCompare(b.nama));
+const lingOf = name => (name ? S.lingkungan.find(l => norm(l.nama) === norm(name)) : null);
+const wilayahOfLing = name => { const l = lingOf(name); return l ? S.wilayah.find(w => w.id === l.wilayah_id) || null : null; };
+// Wilayah umat dalam satu grup SMK (unik, urut)
+function groupWilayah(g) {
+  const ids = new Set(mem(g).map(m => wilayahOfLing(m.lingkungan)?.id).filter(Boolean));
+  return sortedWilayah().filter(w => ids.has(w.id));
+}
+// Nama dasar wilayah dari nama lingkungan: "Theresia 2" → "Theresia", "Felisitas 1A" → "Felisitas"
+const baseWilayah = name => String(name).trim().replace(/\s+\d+[A-Za-z]?$/, '').trim() || String(name).trim();
+// <option> lingkungan dikelompokkan per wilayah
+function lingkunganOpts(cur) {
+  const groups = sortedWilayah().map(w => [w.nama, S.lingkungan.filter(l => l.wilayah_id === w.id)]);
+  const none = S.lingkungan.filter(l => !S.wilayah.some(w => w.id === l.wilayah_id));
+  if (none.length) groups.push(['Tanpa wilayah', none]);
+  const found = lingOf(cur);
+  const extra = cur && !found ? opt(cur, `${cur} (bukan dari master)`, cur) : '';
+  return opt('', '— pilih lingkungan —', cur ? null : '') + extra + groups.filter(([, ls]) => ls.length).map(([wn, ls]) =>
+    `<optgroup label="${h(wn)}">${ls.sort((a, b) => a.nama.localeCompare(b.nama, 'id', { numeric: true }))
+      .filter(l => l.active || l === found).map(l => opt(l.nama, l.nama, found?.nama)).join('')}</optgroup>`).join('');
+}
+
+// Lingkungan yang dipakai umat tapi belum ada di master → dibuat, dikelompokkan ke wilayah sesuai nama depannya
+async function syncLingkungan() {
+  const names = [...new Map(S.umat.filter(u => (u.lingkungan || '').trim()).map(u => [norm(u.lingkungan), u.lingkungan.trim()])).values()];
+  const missing = names.filter(n => !lingOf(n));
+  if (!missing.length) return 0;
+  const newW = [];
+  const wOf = n => { const b = baseWilayah(n); return [...S.wilayah, ...newW].find(w => norm(w.nama) === norm(b)) || (newW.push({ id: uid(), nama: b, urutan: 0, active: true }), newW.at(-1)); };
+  const newL = missing.map(n => ({ id: uid(), nama: n, wilayah_id: wOf(n).id, active: true }));
+  if (newW.length) await store.upsert('wilayah', newW);
+  await store.upsert('lingkungan', newL);
+  S.wilayah = [...S.wilayah, ...newW]; S.lingkungan = [...S.lingkungan, ...newL];
+  return newL.length;
+}
+
+function renderWilayah(main, bar) {
+  const umatIn = l => S.umat.filter(u => u.active && norm(u.lingkungan) === norm(l.nama)).length;
+  const lingChip = l => `<span class="chip${S.admin ? ' tap' : ''}${l.active ? '' : ' off'}" ${S.admin ? `data-act="edit-ling" data-id="${h(l.id)}"` : ''}>${h(l.nama)} <small>${umatIn(l)}</small></span>`;
+  const card = (title, ls, w) => {
+    const total = ls.reduce((a, l) => a + umatIn(l), 0);
+    return `<article class="card"><div class="c-head">
+        <span class="t">${h(title)}</span><span class="sub">${ls.length} lingkungan · ${total} umat</span>
+        ${S.admin && w ? `<button class="btn small" style="margin-left:auto" data-act="edit-wil" data-id="${h(w.id)}">Ubah</button>` : ''}
+      </div><div class="c-body"><div class="chips">${ls.sort((a, b) => a.nama.localeCompare(b.nama, 'id', { numeric: true })).map(lingChip).join('') || '<span class="count">Belum ada lingkungan</span>'}
+        ${S.admin && w ? `<span class="chip add tap" data-act="new-ling" data-k="${h(w.id)}">＋ lingkungan</span>` : ''}</div></div></article>`;
+  };
+  const none = S.lingkungan.filter(l => !S.wilayah.some(w => w.id === l.wilayah_id));
+  main.innerHTML = bar + (S.wilayah.length || S.lingkungan.length
+    ? sortedWilayah().map(w => card(w.nama + (w.active ? '' : ' (nonaktif)'), S.lingkungan.filter(l => l.wilayah_id === w.id), w)).join('')
+      + (none.length ? card('Tanpa wilayah', none, null) : '')
+    : `<div class="empty-state">Belum ada wilayah.${S.admin ? ' Tekan ＋ untuk menambah lingkungan, atau isi lingkungan di data umat.' : ''}</div>`)
+    + (S.admin ? '<div class="btns" style="margin-top:10px"><button class="btn" data-act="new-wil">＋ Wilayah baru</button></div>' : '')
+    + '<p class="hint" style="margin:8px 2px">Angka di tiap lingkungan = jumlah umat aktif.</p>';
+}
+
+function openWilayahForm(w) {
+  const isNew = !w;
+  w = w ? { ...w } : { id: uid(), nama: '', urutan: 0, active: true };
+  const ls = S.lingkungan.filter(l => l.wilayah_id === w.id);
+  const body = `
+    <label class="fld">Nama wilayah<input name="nama" required maxlength="60" value="${h(w.nama)}" placeholder="Theresia"></label>
+    <div class="grid2">
+      <label class="fld">Urutan (kecil tampil dulu)<input type="number" name="urutan" value="${w.urutan ?? 0}"></label>
+      <label style="align-self:end"><input type="checkbox" name="active" ${w.active ? 'checked' : ''}> Aktif</label>
+    </div>
+    ${isNew ? '' : `<p class="hint">Lingkungan: ${ls.length ? h(ls.map(l => l.nama).join(', ')) : '—'}. Untuk memindahkan lingkungan, buka lingkungannya lalu ganti wilayah.</p>`}`;
+  openSheet(isNew ? 'Wilayah baru' : `Ubah wilayah ${w.nama}`, body, {
+    save: async fd => {
+      const row = { ...w, nama: fd.get('nama').trim().replace(/\s+/g, ' '), urutan: Number(fd.get('urutan')) || 0, active: !!fd.get('active') };
+      if (!row.nama) throw new Error('Nama wilayah wajib diisi');
+      if (S.wilayah.some(x => x.id !== row.id && norm(x.nama) === norm(row.nama))) throw new Error(`Wilayah "${row.nama}" sudah ada`);
+      await store.upsert('wilayah', [row]);
+      S.wilayah = [...S.wilayah.filter(x => x.id !== row.id), row];
+      render(); toast('Tersimpan');
+    },
+    del: isNew ? null : async () => {
+      if (ls.length) throw new Error(`Masih ada ${ls.length} lingkungan di wilayah ini. Pindahkan ke wilayah lain dulu.`);
+      await store.remove('wilayah', w.id);
+      S.wilayah = S.wilayah.filter(x => x.id !== w.id); render(); toast('Wilayah dihapus');
+    },
+  });
+}
+
+function openLingkunganForm(l = {}) {
+  const isNew = !l.id;
+  l = { id: uid(), nama: '', wilayah_id: '', active: true, ...l };
+  const used = isNew ? [] : S.umat.filter(u => norm(u.lingkungan) === norm(l.nama));
+  const body = `
+    <label class="fld">Nama lingkungan<input name="nama" required maxlength="60" value="${h(l.nama)}" placeholder="Theresia 1"></label>
+    <label class="fld">Wilayah<select name="wilayah_id">${opt('', '— tanpa wilayah —', l.wilayah_id || '')}${sortedWilayah().map(w => opt(w.id, w.nama, l.wilayah_id)).join('')}</select></label>
+    <label><input type="checkbox" name="active" ${l.active ? 'checked' : ''}> Aktif (bisa dipilih di data umat)</label>
+    ${isNew ? '' : `<p class="hint">${used.length} umat di lingkungan ini. Mengganti nama ikut mengganti lingkungan di data umat tersebut.</p>`}`;
+  openSheet(isNew ? 'Lingkungan baru' : `Ubah lingkungan ${l.nama}`, body, {
+    save: async fd => {
+      const row = { ...l, nama: fd.get('nama').trim().replace(/\s+/g, ' '), wilayah_id: fd.get('wilayah_id') || null, active: !!fd.get('active') };
+      if (!row.nama) throw new Error('Nama lingkungan wajib diisi');
+      if (S.lingkungan.some(x => x.id !== row.id && norm(x.nama) === norm(row.nama))) throw new Error(`Lingkungan "${row.nama}" sudah ada`);
+      await store.upsert('lingkungan', [row]);
+      if (!isNew && row.nama !== l.nama && used.length) {
+        const changed = used.map(u => ({ ...u, lingkungan: row.nama }));
+        await store.upsert('umat', changed);
+        setUmat(S.umat.map(u => changed.find(c => c.id === u.id) || u));
+      }
+      S.lingkungan = [...S.lingkungan.filter(x => x.id !== row.id), row];
+      render(); toast('Tersimpan');
+    },
+    del: isNew ? null : async () => {
+      if (used.length) throw new Error(`Masih dipakai ${used.length} umat. Pindahkan umatnya dulu, atau tandai lingkungan tidak aktif.`);
+      await store.remove('lingkungan', l.id);
+      S.lingkungan = S.lingkungan.filter(x => x.id !== l.id); render(); toast('Lingkungan dihapus');
+    },
+  });
 }
 
 /* ---- Petugas berhalangan ---- */

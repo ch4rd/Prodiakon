@@ -365,6 +365,43 @@ create policy absences_read  on public.absences for select to authenticated usin
 create policy absences_write on public.absences for all to authenticated
   using (public.is_admin_of(paroki_id)) with check (public.is_admin_of(paroki_id));
 
+/* ================= Master wilayah & lingkungan ================= */
+-- Wilayah terdiri dari beberapa lingkungan (mis. wilayah Theresia: Theresia 1–5).
+-- umat.lingkungan menyimpan NAMA lingkungan (dipilih dari master ini).
+create table if not exists public.wilayah (
+  id         uuid primary key default gen_random_uuid(),
+  paroki_id  uuid not null references public.paroki(id) on delete cascade,
+  nama       text not null,
+  urutan     int not null default 0,
+  active     boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists wilayah_nama_uq on public.wilayah (paroki_id, lower(nama));
+
+create table if not exists public.lingkungan (
+  id         uuid primary key default gen_random_uuid(),
+  paroki_id  uuid not null references public.paroki(id) on delete cascade,
+  wilayah_id uuid references public.wilayah(id) on delete set null,
+  nama       text not null,
+  active     boolean not null default true,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists lingkungan_nama_uq on public.lingkungan (paroki_id, lower(nama));
+create index if not exists lingkungan_wilayah_idx on public.lingkungan (wilayah_id);
+
+alter table public.wilayah    enable row level security;
+alter table public.lingkungan enable row level security;
+do $$
+declare t text;
+begin
+  foreach t in array array['wilayah', 'lingkungan'] loop
+    execute format('drop policy if exists %I on public.%I', t || '_read', t);
+    execute format('drop policy if exists %I on public.%I', t || '_write', t);
+    execute format('create policy %I on public.%I for select to authenticated using (public.is_member_of(paroki_id))', t || '_read', t);
+    execute format('create policy %I on public.%I for all to authenticated using (public.is_admin_of(paroki_id)) with check (public.is_admin_of(paroki_id))', t || '_write', t);
+  end loop;
+end $$;
+
 -- Fungsi versi lama (satu paroki) dihapus setelah semua policy lama diganti
 drop function if exists public.is_approved();
 drop function if exists public.is_admin();
