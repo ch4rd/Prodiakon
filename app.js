@@ -2117,8 +2117,6 @@ async function drawMisaPoster(m) {
 
   // footer
   g.fillStyle = '#14532d'; g.fillRect(0, H - 110, W, 110);
-  g.fillStyle = '#fff'; g.font = font(600, 28);
-  g.fillText(fit(`Jadwal lengkap: ${location.host}${location.pathname}`.replace(/\/$/, ''), W - 2 * PAD - 260, font(600, 28)), PAD, H - 48);
   g.fillStyle = 'rgba(255,255,255,.7)'; g.font = font(400, 24); g.textAlign = 'right';
   g.fillText(`Dibuat ${fmtShort(todayIso())}`, W - PAD, H - 48); g.textAlign = 'left';
   return c;
