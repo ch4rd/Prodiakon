@@ -294,11 +294,11 @@ function petugasOpts(cur, placeholder, exclude = [], date = '', slot = '') {
   const names = masterNames().filter(n => !ex.has(norm(n)) || norm(n) === norm(cur));
   const extra = cur && !names.some(n => norm(n) === norm(cur)) ? opt(cur, `${cur} (bukan dari master)`, cur) : '';
   const selName = names.find(x => norm(x) === norm(cur));
+  // Petugas yang berhalangan / terkena pengecualian slot tidak ditampilkan, kecuali yang sudah terpilih
   return opt('', placeholder, cur ? null : '') + extra + names.map(n => {
     const why = unavailable(n, date, slot);
     if (!why) return opt(n, n, selName);
-    const sel = n === selName;
-    return `<option value="${h(n)}" ${sel ? 'selected' : 'disabled'}>${h(n)} (${h(why)})</option>`;
+    return n === selName ? `<option value="${h(n)}" selected>🚫 ${h(n)} (${h(why)})</option>` : '';
   }).join('');
 }
 const hasSeedData = () => !!window.SEED && P.slug === 'albertus'; // data awal hanya milik St. Albertus
@@ -1977,12 +1977,14 @@ const petugasWilayah = p => (p?.wilayah_id ? S.wilayah.find(w => w.id === p.wila
 // Petugas yang sedang dipilih tetap tampil walau di luar wilayah, agar tidak hilang diam-diam.
 function hantaranOpts(cur, wil, date, slot = '', otherWil = false) {
   const ids = new Set(wil.map(w => w.id));
-  const all = S.petugas.filter(p => p.active || norm(p.nama) === norm(cur)).sort((a, b) => a.nama.localeCompare(b.nama));
+  // aktif & tersedia pada tanggal/slot itu; yang sudah terpilih tetap tampil (diberi tanda)
+  const all = S.petugas.filter(p => norm(p.nama) === norm(cur) || (p.active && !unavailable(p.nama, date, slot)))
+    .sort((a, b) => a.nama.localeCompare(b.nama));
   const one = p => {
     const off = unavailable(p.nama, date, slot), sel = norm(p.nama) === norm(cur);
     const pw = petugasWilayah(p), outside = ids.size && !ids.has(p.wilayah_id);
     const why = off || (outside ? (pw ? `wilayah ${pw.nama}` : 'wilayah belum diatur') : '');
-    return `<option value="${h(p.nama)}" ${sel ? 'selected' : off ? 'disabled' : ''}>${h(p.nama)}${why ? ` (${h(why)})` : ''}</option>`;
+    return `<option value="${h(p.nama)}" ${sel ? 'selected' : ''}>${off ? '🚫 ' : ''}${h(p.nama)}${why ? ` (${h(why)})` : ''}</option>`;
   };
   const grp = (label, list) => (list.length ? `<optgroup label="${h(label)}">${list.map(one).join('')}</optgroup>` : '');
   const extra = cur && !all.some(p => norm(p.nama) === norm(cur)) ? opt(cur, `${cur} (bukan dari master)`, cur) : '';
