@@ -387,6 +387,8 @@ create table if not exists public.lingkungan (
   created_at timestamptz not null default now()
 );
 create unique index if not exists lingkungan_nama_uq on public.lingkungan (paroki_id, lower(nama));
+-- Wilayah asal petugas: petugas hantaran (SMK) hanya melayani umat di wilayahnya sendiri
+alter table public.petugas add column if not exists wilayah_id uuid references public.wilayah(id) on delete set null;
 create index if not exists lingkungan_wilayah_idx on public.lingkungan (wilayah_id);
 
 alter table public.wilayah    enable row level security;

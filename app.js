@@ -239,7 +239,7 @@ const S = {
   userId: null, pendingUsers: 0, me: null, pickName: false,
   petugas: [], petugasView: 'tugas', petugasQ: '',
   absences: [], absenceShowPast: false,
-  wilayah: [], lingkungan: [], smkWil: '',
+  wilayah: [], lingkungan: [], smkWil: '', petugasWil: '',
   super: false, parokiList: [], sponsor: [], sponsorAt: Math.floor(Math.random() * 1000),
 };
 // Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
@@ -544,7 +544,11 @@ function renderPetugas(main) {
 
 /* ---- Master petugas ---- */
 function renderMasterPetugas(main, bar, all) {
-  main.innerHTML = bar + `<input class="search" id="mpQ" type="search" placeholder="Cari nama petugas…" value="${h(S.petugasQ)}">
+  const noWil = S.petugas.filter(p => p.active && !petugasWilayah(p)).length;
+  main.innerHTML = bar + `${S.wilayah.length ? `<select class="search" id="mpWil">${opt('', 'Semua wilayah', S.petugasWil)}${opt('none', `Wilayah belum diatur (${noWil})`, S.petugasWil)}${sortedWilayah().map(w => opt(w.id, w.nama, S.petugasWil)).join('')}</select>` : ''}
+    <input class="search" id="mpQ" type="search" placeholder="Cari nama petugas…" value="${h(S.petugasQ)}">
+    ${S.admin && S.wilayah.length && noWil ? `<div class="push-cta">🗺️ ${noWil} petugas aktif belum punya wilayah.
+      <button class="btn small primary" data-act="petugas-wil-auto">Isi otomatis dari hantaran</button></div>` : ''}
     <div id="mpList"></div>`;
   const draw = () => {
     const q = norm(S.petugasQ);
@@ -552,7 +556,7 @@ function renderMasterPetugas(main, bar, all) {
       const a = all.find(x => x.key === norm(p.nama));
       const mi = a ? a.items.filter(i => i.type === 'misa').length : 0, sm = a ? a.items.filter(i => i.type === 'smk').length : 0;
       return `<div class="umat${S.admin ? ' tap' : ''}" ${S.admin ? `data-act="edit-petugas" data-id="${h(p.id)}"` : ''}>
-        <div><span class="nm">${h(p.nama)}</span>${(() => { const a = nextAbsence(p.id); if (!a) return ''; const per = a.start_date <= todayIso() ? `s/d ${fmtShort(a.end_date)}` : `${fmtShort(a.start_date)} – ${fmtShort(a.end_date)}`; return ` <span class="tag warn" title="${h(a.reason)}">🚫 Berhalangan ${h(per)}</span>`; })()}</div>
+        <div><span class="nm">${h(p.nama)}</span>${petugasWilayah(p) ? ` <span class="tag wil">${h(petugasWilayah(p).nama)}</span>` : (S.wilayah.length && p.active ? ' <span class="tag warn">wilayah?</span>' : '')}${(() => { const a = nextAbsence(p.id); if (!a) return ''; const per = a.start_date <= todayIso() ? `s/d ${fmtShort(a.end_date)}` : `${fmtShort(a.start_date)} – ${fmtShort(a.end_date)}`; return ` <span class="tag warn" title="${h(a.reason)}">🚫 Berhalangan ${h(per)}</span>`; })()}</div>
         ${p.telp ? `<div class="phones">${phoneLinks(p.telp)}</div>` : ''}
         ${p.note ? `<div class="ad">📝 ${h(p.note)}</div>` : ''}
         <div class="tags">${mi || sm ? `${mi ? `<span class="tag">${mi} misa</span>` : ''}${sm ? `<span class="tag">${sm} SMK</span>` : ''}`
@@ -561,20 +565,23 @@ function renderMasterPetugas(main, bar, all) {
     };
     const sec = (title, list) => (list.length ? `<div class="sec-title">${title} <span class="count">${list.length} orang</span></div>
       <div class="list">${list.map(row).join('')}</div>` : '');
-    const match = p => !q || norm([p.nama, p.telp, p.note].join(' ')).includes(q);
+    const match = p => (!S.petugasWil || (S.petugasWil === 'none' ? !petugasWilayah(p) : p.wilayah_id === S.petugasWil))
+      && (!q || norm([p.nama, p.telp, p.note, petugasWilayah(p)?.nama].join(' ')).includes(q));
     const html = sec('Aktif', S.petugas.filter(p => p.active && match(p))) + sec('Tidak aktif', S.petugas.filter(p => !p.active && match(p)));
     $('#mpList').innerHTML = html || `<div class="empty-state">${S.petugas.length ? 'Tidak ditemukan.' : `Belum ada petugas.${S.admin ? ' Tekan ＋ untuk menambah.' : ''}`}</div>`;
   };
   $('#mpQ').addEventListener('input', e => { S.petugasQ = e.target.value; draw(); });
+  $('#mpWil')?.addEventListener('change', e => { S.petugasWil = e.target.value; draw(); });
   draw();
 }
 
 function openPetugasForm(p) {
   const isNew = !p;
-  p = p ? { ...p } : { id: uid(), nama: '', telp: '', note: '', active: true };
+  p = p ? { ...p } : { id: uid(), nama: '', telp: '', note: '', active: true, wilayah_id: null };
   const body = `
     <label class="fld">Nama (sesuai yang dipakai di jadwal)<input name="nama" required value="${h(p.nama)}"></label>
     <label class="fld">Telp / HP<input name="telp" value="${h(p.telp)}" inputmode="tel"></label>
+    <label class="fld">Wilayah (petugas hantaran hanya melayani umat di wilayah ini)<select name="wilayah_id">${opt('', '— belum diatur —', p.wilayah_id || '')}${sortedWilayah().map(w => opt(w.id, w.nama, p.wilayah_id)).join('')}</select></label>
     <label class="fld">Catatan<input name="note" value="${h(p.note)}"></label>
     <label><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Aktif (bisa dipilih di jadwal)</label>
     ${isNew ? '' : '<p class="hint">Mengganti nama akan ikut mengganti nama ini di semua jadwal misa & SMK.</p>'}
@@ -589,7 +596,7 @@ function openPetugasForm(p) {
       else if (b.dataset.sh === 'ab-edit') { dlg.close(); openAbsenceForm(S.absences.find(a => a.id === b.dataset.id)); }
     },
     save: async fd => {
-      const row = { ...p, nama: fd.get('nama').trim().replace(/\s+/g, ' '), telp: fd.get('telp').trim(), note: fd.get('note').trim(), active: !!fd.get('active') };
+      const row = { ...p, nama: fd.get('nama').trim().replace(/\s+/g, ' '), telp: fd.get('telp').trim(), note: fd.get('note').trim(), active: !!fd.get('active'), wilayah_id: fd.get('wilayah_id') || null };
       if (!row.nama) { toast('Nama wajib diisi'); return false; }
       if (S.petugas.some(x => x.id !== row.id && norm(x.nama) === norm(row.nama))) { toast(`"${row.nama}" sudah ada di master`); return false; }
       await store.upsert('petugas', [row]);
@@ -741,6 +748,8 @@ function buildIssues() {
       const sun = weekendsOf(S.monthId)[i]?.sun || '';
       const day = sun && slotByKey(g.slot) ? slotDate(slotByKey(g.slot), sun) : sun;
       if (!name) { out.push(['⚠️', `SMK grup ${g.no} (${smkSlotLabel(g.slot)}) minggu ${w} belum ada petugas.`, `smk:${g.id}`, day]); return; }
+      const gw = groupWilayah(g), pw = petugasWilayah(inMaster(name));
+      if (gw.length && pw && !gw.some(w => w.id === pw.id)) out.push(['⚠️', `${name} (wilayah ${pw.nama}) mengantar SMK grup ${g.no} di wilayah ${gw.map(w => w.nama).join(', ')} (${w}).`, `smk:${g.id}`, day]);
       if (!REGULAR.includes(g.slot)) return;
       const lm = linkedMisa(g.slot, i);
       if (!lm) out.push(['⚠️', `Jadwal misa ${g.slot} minggu ke-${i + 1} (${w}) belum dibuat, padahal ada petugas SMK grup ${g.no}.`, `misa-new:${g.slot}|${day}`, day]);
@@ -1078,8 +1087,8 @@ function openSmk(g) {
       <label class="fld">No<input name="no" value="${h(g.no)}"></label>
       <label class="fld">Jam layanan<select name="slot">${SMK_SLOTS.map(s => opt(s.key, s.label, g.slot)).join('')}</select></label>
     </div>
-    <div class="fld">Petugas per minggu</div>
-    <div class="grid2">${weeks().map((w, i) => `<label class="fld">${h(w)}<select name="off${i}">${petugasOpts(g.officers[i] || '', '— kosong —', [], smkDay(g.slot, i))}</select></label>`).join('')}</div>
+    <div class="fld">Petugas per minggu <span class="hint" id="wilHint"></span></div>
+    <div class="grid2" id="weekSel">${weeks().map((w, i) => `<label class="fld">${h(w)}<select name="off${i}"></select></label>`).join('')}</div>
     <div class="fld">Umat yang dilayani <span id="memCount"></span></div>
     <div id="memList" class="mem-list"></div>
     <div class="grid2" style="grid-template-columns:1fr auto;align-items:end">
@@ -1098,7 +1107,10 @@ function openSmk(g) {
       await store.upsert('smk_groups', [row]);
       const i = S.smk.findIndex(x => x.id === row.id);
       if (i >= 0) S.smk[i] = row; else S.smk.push(row);
-      render(); toast('Tersimpan');
+      // Petugas hantaran = petugas misa di hari & jam yang sama → otomatis masuk jadwal misa
+      const r = await addHantaranToMisa(row);
+      render();
+      toast(['Tersimpan', r.added && `${r.added} petugas hantaran ditambahkan ke jadwal misa`, r.noMisa && `${r.noMisa} minggu belum ada jadwal misanya`].filter(Boolean).join(' · '));
     },
     del: isNew ? null : async () => {
       await store.remove('smk_groups', g.id);
@@ -1110,6 +1122,17 @@ function openSmk(g) {
     },
   });
   const otherGroups = id => S.smk.filter(x => x.id !== g.id && x.members.some(m => m.umat_id === id)).map(x => x.no);
+  // Pilihan petugas per minggu mengikuti wilayah umat di grup ini (diperbarui saat umat ditambah/dihapus)
+  const renderWeekSelects = () => {
+    const f = $('#sheetForm'), slot = f.elements.slot.value;
+    const wil = groupWilayah({ members });
+    $('#wilHint').textContent = wil.length ? `— wilayah ${wil.map(w => w.nama).join(', ')}` : '';
+    weeks().forEach((_, i) => {
+      const sel = f.elements['off' + i], cur = sel.dataset.ready ? sel.value : (g.officers[i] || '');
+      sel.dataset.ready = '1';
+      sel.innerHTML = hantaranOpts(cur, wil, smkDay(slot, i));
+    });
+  };
   const drawMem = () => {
     $('#memList').innerHTML = members.length ? members.map((m, i) => {
       const u = m.umat_id && UM.get(m.umat_id), d = u || m;
@@ -1129,6 +1152,7 @@ function openSmk(g) {
     const inGroup = new Set(members.map(m => m.umat_id));
     $('#umatOpts').innerHTML = S.umat.filter(u => u.active && !inGroup.has(u.id))
       .map(u => `<option value="${h(umatLabel(u))}">`).join('');
+    renderWeekSelects();
   };
   const addUmat = async text => {
     const t = String(text).trim();
@@ -1149,6 +1173,7 @@ function openSmk(g) {
   const inp = $('#addUmat');
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addUmat(inp.value); } });
   inp.addEventListener('input', e => { if (e.inputType === 'insertReplacementText' || !e.inputType) addUmat(inp.value); });
+  $('#sheetForm').elements.slot.addEventListener('change', renderWeekSelects);
   drawMem();
 }
 
@@ -1413,6 +1438,7 @@ $('#main').addEventListener('click', e => {
   if (act === 'edit-wil') { if (S.admin) openWilayahForm(S.wilayah.find(w => w.id === id)); return; }
   if (act === 'edit-ling') { if (S.admin) openLingkunganForm(S.lingkungan.find(l => l.id === id)); return; }
   if (act === 'new-wil') { if (S.admin) openWilayahForm(); return; }
+  if (act === 'petugas-wil-auto') { if (S.admin) run(autoPetugasWilayah); return; }
   if (act === 'new-ling') { if (S.admin) openLingkunganForm(k ? { wilayah_id: k } : undefined); return; }
   if (act === 'misa-filter') { S.misaFilter = k; render(); }
   else if (act === 'edit-misa') openMisa(S.misa.find(m => m.id === id));
@@ -1869,6 +1895,70 @@ function openLingkunganForm(l = {}) {
       S.lingkungan = S.lingkungan.filter(x => x.id !== l.id); render(); toast('Lingkungan dihapus');
     },
   });
+}
+
+/* ---- Wilayah petugas & hantaran ---- */
+const petugasWilayah = p => (p?.wilayah_id ? S.wilayah.find(w => w.id === p.wilayah_id) || null : null);
+// Pilihan petugas hantaran: wilayah yang sama dulu; wilayah lain tidak bisa dipilih; berhalangan ikut dikunci
+function hantaranOpts(cur, wil, date) {
+  const ids = new Set(wil.map(w => w.id));
+  const all = S.petugas.filter(p => p.active || norm(p.nama) === norm(cur)).sort((a, b) => a.nama.localeCompare(b.nama));
+  const one = (p, lock) => {
+    const a = absenceOn(p.nama, date), sel = norm(p.nama) === norm(cur);
+    const why = a ? absenceLabel(a) : lock ? `wilayah ${petugasWilayah(p)?.nama}` : '';
+    return `<option value="${h(p.nama)}" ${sel ? 'selected' : (a || lock) ? 'disabled' : ''}>${h(p.nama)}${why ? ` (${h(why)})` : ''}</option>`;
+  };
+  const same = all.filter(p => ids.has(p.wilayah_id)), none = all.filter(p => !petugasWilayah(p)), other = all.filter(p => petugasWilayah(p) && !ids.has(p.wilayah_id));
+  const extra = cur && !all.some(p => norm(p.nama) === norm(cur)) ? opt(cur, `${cur} (bukan dari master)`, cur) : '';
+  const grp = (label, list, lock) => (list.length ? `<optgroup label="${h(label)}">${list.map(p => one(p, lock)).join('')}</optgroup>` : '');
+  if (!ids.size) return opt('', '— kosong —', cur ? null : '') + extra + grp('Semua petugas', all, false); // umat belum punya wilayah
+  return opt('', '— kosong —', cur ? null : '') + extra
+    + grp(`Wilayah ${wil.map(w => w.nama).join(', ')}`, same, false)
+    + grp('Wilayah belum diatur', none, false)
+    + grp('Wilayah lain (tidak bisa dipilih)', other, true);
+}
+// Petugas hantaran tiap minggu → ditambahkan ke misa rutin pada hari & jam yang sama
+async function addHantaranToMisa(g) {
+  if (!REGULAR.includes(g.slot)) return { added: 0, noMisa: 0 };
+  let added = 0, noMisa = 0;
+  const changed = new Map();
+  g.officers.forEach((n, i) => {
+    if (!n || n === '-') return;
+    const lm = linkedMisa(g.slot, i);
+    if (!lm) { noMisa++; return; }
+    const m = changed.get(lm.id) || { ...lm, officers: [...lm.officers] };
+    if (!m.officers.some(x => norm(x) === norm(n))) { m.officers.push(n); added++; changed.set(m.id, m); }
+  });
+  if (changed.size) {
+    await store.upsert('misa', [...changed.values()]);
+    S.misa = S.misa.map(m => changed.get(m.id) || m);
+  }
+  return { added, noMisa };
+}
+// Isi wilayah petugas yang kosong dari grup hantaran yang paling sering dilayani (bulan aktif); seri → dibiarkan
+async function autoPetugasWilayah() {
+  const count = new Map();
+  for (const g of S.smk) {
+    const gw = groupWilayah(g);
+    if (gw.length !== 1) continue; // grup campuran tidak dipakai sebagai acuan
+    for (const n of g.officers) {
+      const p = n && inMaster(n);
+      if (!p || petugasWilayah(p)) continue;
+      const c = count.get(p.id) || {}; c[gw[0].id] = (c[gw[0].id] || 0) + 1; count.set(p.id, c);
+    }
+  }
+  const rows = [];
+  for (const [pid, c] of count) {
+    const top = Object.entries(c).sort((a, b) => b[1] - a[1]);
+    if (top.length > 1 && top[0][1] === top[1][1]) continue;
+    rows.push({ ...S.petugas.find(p => p.id === pid), wilayah_id: top[0][0] });
+  }
+  if (!rows.length) { toast('Tidak ada petugas yang bisa diisi otomatis dari hantaran bulan ini'); return; }
+  await store.upsert('petugas', rows);
+  setPetugas(S.petugas.map(p => rows.find(r => r.id === p.id) || p));
+  render();
+  const left = S.petugas.filter(p => p.active && !petugasWilayah(p)).length;
+  toast(`${rows.length} petugas diisi wilayahnya${left ? ` · ${left} belum (atur manual)` : ''}`);
 }
 
 /* ---- Petugas berhalangan ---- */
