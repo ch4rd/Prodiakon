@@ -13,8 +13,9 @@ create table if not exists public.paroki (
   active     boolean not null default true,
   created_at timestamptz not null default now()
 );
--- Buat jadwal bulan depan otomatis (mulai tgl 20, saat admin membuka app)
-alter table public.paroki add column if not exists auto_month boolean not null default true;
+-- Opsional: buat jadwal bulan depan otomatis (mulai tgl 20, saat admin membuka app). Default mati.
+alter table public.paroki add column if not exists auto_month boolean not null default false;
+alter table public.paroki alter column auto_month set default false; -- default: bulan baru dibuat manual oleh admin
 
 insert into public.paroki (slug, nama, kota, misa_slots, smk_extra) values (
   'albertus', 'St. Albertus', 'Harapan Indah, Bekasi',

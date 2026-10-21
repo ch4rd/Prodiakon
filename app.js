@@ -11,7 +11,7 @@ const DEFAULT_PAROKI = {
     { key: 'M1', day: 6, time: '17.30', need: 14 }, { key: 'M2', day: 0, time: '06.00', need: 10 },
     { key: 'M3', day: 0, time: '08.30', need: 20 }, { key: 'M4', day: 0, time: '17.30', need: 26 },
   ],
-  auto_month: true,
+  auto_month: false, // jadwal bulan baru dibuat manual oleh admin
   smk_extra: [{ key: 'PRIVAT', label: 'Privat (petugas tetap)' }, { key: 'JUMAT', label: 'Jumat (Suster)' }],
 };
 let P = DEFAULT_PAROKI;      // paroki aktif
@@ -1267,7 +1267,7 @@ async function createMonth(ym, { gen = true, copyFrom = null, notesFrom = '', in
 
 // Admin membuka app pada/after tanggal 20 → bulan depan dibuat otomatis bila belum ada
 async function autoNextMonth() {
-  if (!S.admin || P.auto_month === false || !REGULAR.length || !S.months.length) return; // bulan pertama dibuat admin sendiri
+  if (!S.admin || P.auto_month !== true || !REGULAR.length || !S.months.length) return; // hanya bila paroki menyalakannya
   const today = iso(new Date());
   if (Number(today.slice(8, 10)) < AUTO_MONTH_DAY) return;
   const ym = nextYm(today.slice(0, 7));
@@ -1794,7 +1794,7 @@ function openParokiForm(p) {
       <label><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Aktif (bisa dipilih saat daftar)</label>` : ''}
     ${p.slug ? `<p class="hint">Link paroki: <b>${h(parokiLink(p))}</b></p>` : ''}
     <label class="fld">Jam misa rutin (satu per baris: Kode | Hari | Jam | Jumlah petugas)<textarea name="slots" rows="5">${h(slotsToText(p))}</textarea></label>
-    <label><input type="checkbox" name="auto_month" ${p.auto_month !== false ? 'checked' : ''}> Buat jadwal bulan depan otomatis (mulai tanggal ${AUTO_MONTH_DAY} tiap bulan, saat admin membuka app)</label>
+    <label><input type="checkbox" name="auto_month" ${p.auto_month === true ? 'checked' : ''}> Buat jadwal bulan depan otomatis (mulai tanggal ${AUTO_MONTH_DAY} tiap bulan, saat admin membuka app)</label>
     <label class="fld">Slot SMK tambahan di luar jam misa (Kode | Nama)<textarea name="extra" rows="3">${h(extraToText(p))}</textarea></label>
     <p class="hint">Contoh: <code>M1 | Sabtu | 17.30 | 14</code> (14 = jumlah petugas dibutuhkan, boleh dikosongkan).
       Mengubah jam misa tidak mengubah jadwal yang sudah dibuat; berlaku untuk bulan berikutnya.</p>`;
