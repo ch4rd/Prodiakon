@@ -84,8 +84,19 @@ function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
   clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 2600);
 }
+// Pesan error teknis dari server diterjemahkan ke bahasa pengguna (tanpa detail sistem)
+function friendlyError(e) {
+  const m = String(e?.message || e || '');
+  if (/row-level security|permission denied|42501|not allowed/i.test(m)) return 'Anda tidak punya izin untuk perubahan ini.';
+  if (/JWT|jwt expired|invalid claim|refresh token|session/i.test(m)) return 'Sesi login sudah habis, silakan keluar lalu masuk lagi.';
+  if (/Failed to fetch|NetworkError|Load failed|network/i.test(m)) return 'Tidak ada koneksi internet. Coba lagi sebentar lagi.';
+  if (/duplicate key|23505|already exists/i.test(m)) return 'Data dengan nama yang sama sudah ada.';
+  if (/violates foreign key|23503/i.test(m)) return 'Data ini masih dipakai di tempat lain, jadi belum bisa dihapus.';
+  if (/schema cache|PGRST|relation .* does not exist|column .* does not exist/i.test(m)) return 'Server sedang diperbarui. Coba muat ulang app beberapa saat lagi.';
+  return m;
+}
 async function run(fn) {
-  try { return await fn(); } catch (e) { console.error(e); toast('Gagal: ' + (e.message || e)); return false; }
+  try { return await fn(); } catch (e) { console.error(e); toast('Gagal: ' + friendlyError(e)); return false; }
 }
 function download(name, text, type) {
   const a = document.createElement('a');
@@ -1357,7 +1368,7 @@ function openMenu() {
   const body = `<div class="menu-list">${items.map(([k, l]) => (k === '#' ? `<div class="menu-sec">${h(l)}</div>`
     : `<button type="button" data-sh="menu" data-k="${k}">${h(l)}</button>`)).join('')}</div>
     <p class="hint">Paroki: <b>${h(P.nama)}</b>${P.kota ? ` · ${h(P.kota)}` : ''}</p>
-    <p class="hint">Mode: ${ONLINE ? `Online (Supabase) · ${S.super ? 'Super admin' : S.admin ? 'Admin – bisa mengubah' : 'Lihat saja – hanya admin yang bisa mengubah'}` : 'Lokal – data hanya di perangkat ini. Isi config.js untuk menyambung ke Supabase.'}</p>`;
+    <p class="hint">Peran: ${ONLINE ? (S.super ? 'Super admin' : S.admin ? 'Admin – bisa mengubah' : 'Lihat saja – hanya admin yang bisa mengubah') : 'Mode coba – data hanya tersimpan di perangkat ini'}</p>`;
   openSheet('Menu', body, {
     onClick: (b) => { dlg.close(); menuAction(b.dataset.k); },
   });
@@ -2896,7 +2907,10 @@ async function onAuthSubmit(e) {
         options: { data: { nama: fd.get('nama').trim(), wa, paroki }, emailRedirectTo: parokiLink({ slug: paroki }) },
       });
       if (error) {
-        err.textContent = /not allowed|disabled/i.test(error.message) ? 'Pendaftaran sedang ditutup. Hubungi admin.' : 'Daftar gagal: ' + error.message;
+        err.textContent = /not allowed|disabled/i.test(error.message) ? 'Pendaftaran sedang ditutup. Hubungi admin.'
+          : /already registered|already exists/i.test(error.message) ? 'Email ini sudah terdaftar. Silakan masuk.'
+          : /password/i.test(error.message) ? 'Password minimal 6 karakter.'
+          : 'Daftar gagal: ' + friendlyError(error);
         return;
       }
       if (data.session) return await showApp(); // konfirmasi email dimatikan → langsung ke layar menunggu persetujuan
@@ -2904,10 +2918,11 @@ async function onAuthSubmit(e) {
       return;
     }
     const { error } = await store.sb.auth.signInWithPassword({ email, password });
-    if (error) err.textContent = 'Login gagal: ' + (/confirm/i.test(error.message) ? 'email belum dikonfirmasi, cek kotak masuk email.' : error.message);
+    if (error) err.textContent = 'Login gagal: ' + (/confirm/i.test(error.message) ? 'email belum dikonfirmasi, cek kotak masuk email.'
+      : /invalid login|invalid credentials/i.test(error.message) ? 'email atau password salah.' : friendlyError(error));
     else await showApp();
   } catch (ex) {
-    err.textContent = 'Gagal: ' + (ex.message || ex);
+    err.textContent = 'Gagal: ' + friendlyError(ex);
   } finally { btn.disabled = false; }
 }
 async function boot() {
