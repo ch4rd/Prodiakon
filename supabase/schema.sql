@@ -406,6 +406,78 @@ begin
   end loop;
 end $$;
 
+/* ================= Absen petugas misa ================= */
+-- Koordinator misa (akun yang ditautkan ke nama koordinator) mengabsen petugas misanya; admin juga boleh.
+create table if not exists public.attendance (
+  id             uuid primary key default gen_random_uuid(),
+  paroki_id      uuid not null references public.paroki(id) on delete cascade,
+  misa_id        uuid not null references public.misa(id) on delete cascade,
+  month_id       text not null,                         -- untuk memuat per bulan
+  petugas        text not null,                         -- nama petugas (seperti di misa.officers)
+  present        boolean not null default false,
+  substitute_for text not null default '',              -- diisi bila ia datang menggantikan petugas lain
+  note           text not null default '',
+  checked_by     uuid references auth.users(id) on delete set null,
+  checked_at     timestamptz not null default now(),
+  constraint attendance_note_len check (length(note) <= 200)
+);
+create unique index if not exists attendance_misa_petugas_uq on public.attendance (misa_id, lower(petugas));
+create index if not exists attendance_month_idx on public.attendance (paroki_id, month_id);
+
+-- Apakah akun yang login adalah koordinator misa tsb (lewat app_users.petugas = misa.coordinator)
+create or replace function public.is_misa_coordinator(m uuid) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.misa x join public.app_users u on u.user_id = auth.uid()
+    where x.id = m and u.status = 'approved' and u.paroki_id = x.paroki_id
+      and coalesce(u.petugas, '') <> '' and lower(x.coordinator) = lower(u.petugas)
+  );
+$$;
+revoke all on function public.is_misa_coordinator(uuid) from public, anon;
+grant execute on function public.is_misa_coordinator(uuid) to authenticated;
+
+alter table public.attendance enable row level security;
+drop policy if exists attendance_read  on public.attendance;
+drop policy if exists attendance_write on public.attendance;
+create policy attendance_read  on public.attendance for select to authenticated using (public.is_member_of(paroki_id));
+create policy attendance_write on public.attendance for all to authenticated
+  using (public.is_admin_of(paroki_id) or public.is_misa_coordinator(misa_id))
+  with check (public.is_admin_of(paroki_id) or public.is_misa_coordinator(misa_id));
+
+-- Koordinator/admin mengganti petugas yang berhalangan saat misa:
+-- p_old diganti p_new di jadwal misa; p_old tercatat tidak hadir, p_new hadir sebagai pengganti.
+create or replace function public.replace_officer(p_misa uuid, p_old text, p_new text) returns void
+language plpgsql security definer set search_path = public as $$
+declare m public.misa;
+begin
+  select * into m from public.misa where id = p_misa;
+  if not found then raise exception 'Misa tidak ditemukan'; end if;
+  if not (public.is_admin_of(m.paroki_id) or public.is_misa_coordinator(p_misa)) then
+    raise exception 'Hanya koordinator misa ini atau admin yang boleh mengganti petugas';
+  end if;
+  if not exists (select 1 from unnest(m.officers) o where lower(o) = lower(p_old)) then
+    raise exception 'Petugas % tidak ada di misa ini', p_old;
+  end if;
+  if exists (select 1 from unnest(m.officers) o where lower(o) = lower(p_new)) then
+    raise exception 'Petugas % sudah ada di misa ini', p_new;
+  end if;
+  if not exists (select 1 from public.petugas t where t.paroki_id = m.paroki_id and t.active and lower(t.nama) = lower(p_new)) then
+    raise exception 'Pengganti harus petugas aktif di Master petugas';
+  end if;
+  update public.misa
+     set officers = array(select case when lower(o) = lower(p_old) then p_new else o end from unnest(m.officers) o),
+         coordinator = case when lower(m.coordinator) = lower(p_old) then p_new else m.coordinator end
+   where id = p_misa;
+  insert into public.attendance (paroki_id, misa_id, month_id, petugas, present, note, checked_by)
+  values (m.paroki_id, p_misa, m.month_id, p_old, false, 'diganti ' || p_new, auth.uid())
+  on conflict (misa_id, (lower(petugas))) do update set present = false, note = excluded.note, checked_by = excluded.checked_by, checked_at = now();
+  insert into public.attendance (paroki_id, misa_id, month_id, petugas, present, substitute_for, checked_by)
+  values (m.paroki_id, p_misa, m.month_id, p_new, true, p_old, auth.uid())
+  on conflict (misa_id, (lower(petugas))) do update set present = true, substitute_for = excluded.substitute_for, checked_by = excluded.checked_by, checked_at = now();
+end $$;
+revoke all on function public.replace_officer(uuid, text, text) from public, anon;
+grant execute on function public.replace_officer(uuid, text, text) to authenticated;
+
 -- Fungsi versi lama (satu paroki) dihapus setelah semua policy lama diganti
 drop function if exists public.is_approved();
 drop function if exists public.is_admin();

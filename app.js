@@ -99,7 +99,7 @@ function download(name, text, type) {
 class LocalStore {
   constructor() { this.key = 'prodiakon.data.v1'; }
   read() {
-    const empty = { months: [], misa: [], smk_groups: [], umat: [], petugas: [], sponsor: [], absences: [], wilayah: [], lingkungan: [] };
+    const empty = { months: [], misa: [], smk_groups: [], umat: [], petugas: [], sponsor: [], absences: [], wilayah: [], lingkungan: [], attendance: [] };
     try { return { ...empty, ...JSON.parse(lsGet(this.key) || '{}') }; } catch { return empty; }
   }
   write(d) { localStorage.setItem(this.key, JSON.stringify(d)); }
@@ -118,6 +118,17 @@ class LocalStore {
       const i = arr.findIndex(x => x.id === r.id);
       if (i >= 0) arr[i] = r; else arr.push(r);
     }
+    this.write(d);
+  }
+  async replaceOfficer(misaId, oldN, newN) {
+    const d = this.read(), m = d.misa.find(x => x.id === misaId);
+    if (!m) throw new Error('Misa tidak ditemukan');
+    if (m.officers.some(o => norm(o) === norm(newN))) throw new Error(`Petugas ${newN} sudah ada di misa ini`);
+    m.officers = m.officers.map(o => (norm(o) === norm(oldN) ? newN : o));
+    if (norm(m.coordinator) === norm(oldN)) m.coordinator = newN;
+    const put = r => { const i = d.attendance.findIndex(x => x.misa_id === misaId && norm(x.petugas) === norm(r.petugas)); if (i >= 0) d.attendance[i] = { ...d.attendance[i], ...r }; else d.attendance.push({ id: uid(), ...r }); };
+    put({ misa_id: misaId, month_id: m.month_id, petugas: oldN, present: false, note: 'diganti ' + newN, substitute_for: '' });
+    put({ misa_id: misaId, month_id: m.month_id, petugas: newN, present: true, substitute_for: oldN, note: '' });
     this.write(d);
   }
   async remove(kind, id) {
@@ -152,6 +163,10 @@ class SupaStore {
   }
   async remove(kind, id) {
     const { error } = await this.sb.from(kind).delete().eq('id', id).eq('paroki_id', P.id);
+    if (error) throw error;
+  }
+  async replaceOfficer(misaId, oldN, newN) {
+    const { error } = await this.sb.rpc('replace_officer', { p_misa: misaId, p_old: oldN, p_new: newN });
     if (error) throw error;
   }
   async isAdmin(pid = P.id) {
@@ -240,6 +255,7 @@ const S = {
   petugas: [], petugasView: 'tugas', petugasQ: '',
   absences: [], absenceShowPast: false,
   wilayah: [], lingkungan: [], smkWil: '', petugasWil: '',
+  attendance: [], koorMisa: null, koorDraft: null,
   super: false, parokiList: [], sponsor: [], sponsorAt: Math.floor(Math.random() * 1000),
 };
 // Master umat: UM = Map(id → umat). Anggota grup menyimpan {umat_id, nama}; mem(g) mengisi detail dari master.
@@ -317,8 +333,9 @@ async function loadMonths() {
 async function loadMonth() {
   if (S.monthId) {
     lsSet('prodiakon.month', S.monthId);
-    const [m, g, u, pt] = await Promise.all([store.list('misa', S.monthId), store.list('smk_groups', S.monthId), store.list('umat'), store.list('petugas')]);
-    S.misa = m;
+    const [m, g, u, pt, at] = await Promise.all([store.list('misa', S.monthId), store.list('smk_groups', S.monthId), store.list('umat'), store.list('petugas'),
+      store.list('attendance', S.monthId).catch(() => [])]);
+    S.misa = m; S.attendance = at;
     S.smk = g.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
     setUmat(u); setPetugas(pt);
     if (S.admin) {
@@ -353,7 +370,8 @@ function render() {
 
   const main = $('#main');
   if (!S.monthId) { main.innerHTML = emptyState(); return; }
-  if (S.tab === 'saya') renderSaya(main);
+  if (S.tab === 'koor') renderKoor(main);
+  else if (S.tab === 'saya') renderSaya(main);
   else if (S.tab === 'misa') renderMisa(main);
   else if (S.tab === 'smk') renderSmk(main);
   else if (S.tab === 'petugas') renderPetugas(main);
@@ -418,7 +436,8 @@ function misaCard(m, highlight) {
     <div class="c-body">
       ${chips ? `<div class="chips">${chips}</div>` : '<span class="count">Belum ada petugas</span>'}
       ${m.note ? `<div class="note">📝 ${h(m.note)}</div>` : ''}
-      <div class="count" style="margin-top:6px">${m.officers.length} petugas${m.need ? ` / butuh ${m.need}` : ''}</div>
+      <div class="count" style="margin-top:6px">${m.officers.length} petugas${m.need ? ` / butuh ${m.need}` : ''}${attSummary(m)}</div>
+      ${canCoordinate(m) && m.date <= todayIso() ? `<div class="btns" style="margin-top:6px"><button class="btn small" data-act="koor" data-id="${h(m.id)}">📋 Absen petugas</button></div>` : ''}
     </div>
   </article>`;
 }
@@ -708,7 +727,13 @@ function renderSaya(main) {
   const pushCta = ps === 'off' || ps === 'ios-install'
     ? `<div class="push-cta">🔔 ${ps === 'off' ? 'Dapatkan pengingat H-1 sebelum bertugas.' : h(PUSH_TEXT['ios-install'])}
         ${ps === 'off' ? '<button class="btn small primary" data-act="push-on">Aktifkan</button>' : ''}</div>` : '';
-  main.innerHTML = `${pushCta}<div class="me-head">
+  // Koordinator (akun ditautkan ke nama koordinator): misa hari ini → tombol besar; berikutnya → info
+  const myKoor = S.misa.filter(m => S.me?.petugas && norm(m.coordinator) === norm(S.me.petugas) && m.date >= todayIso()).sort(cmpMisa);
+  const koorCta = myKoor.filter(m => m.date === todayIso()).map(m => `<div class="koor-cta">
+      <div><div class="hint">Hari ini Anda koordinator</div><b>${h(misaTitle(m))}</b>${attSummary(m)}</div>
+      <button class="btn primary" data-act="koor" data-id="${h(m.id)}">📋 Mulai absen</button></div>`).join('')
+    || (myKoor[0] ? `<div class="push-cta">⭐ Anda koordinator ${h(misaTitle(myKoor[0]))} — absen dibuka pada hari misa.</div>` : '');
+  main.innerHTML = `${koorCta}${pushCta}<div class="me-head">
       <div><div class="hint">Jadwal saya · ${h(monthName(S.monthId))}</div><h2>${h(name)}</h2></div>
       ${nameLocked() ? '' : '<button class="link-btn" data-act="change-myname">Bukan saya?</button>'}
     </div>
@@ -1464,6 +1489,12 @@ $('#main').addEventListener('click', e => {
   if (act === 'petugas-wil-auto') { if (S.admin) run(autoPetugasWilayah); return; }
   if (act === 'new-ling') { if (S.admin) openLingkunganForm(k ? { wilayah_id: k } : undefined); return; }
   if (act === 'auto-fill') { if (S.admin) openAutoFill(); return; }
+  if (act === 'koor') { const m = S.misa.find(x => x.id === id); if (m && canCoordinate(m)) { S.prevTab = S.tab; S.tab = 'koor'; S.koorMisa = id; S.koorDraft = null; render(); window.scrollTo(0, 0); } return; }
+  if (act === 'koor-back') { S.tab = S.prevTab && S.prevTab !== 'koor' ? S.prevTab : 'saya'; S.koorMisa = null; render(); return; }
+  if (act === 'koor-toggle') { S.koorDraft.set(k, !S.koorDraft.get(k)); renderKoor($('#main')); return; }
+  if (act === 'koor-all') { for (const n of S.koorDraft.keys()) S.koorDraft.set(n, true); renderKoor($('#main')); return; }
+  if (act === 'koor-save') { run(saveKoor); return; }
+  if (act === 'koor-ganti') { openGanti(k); return; }
   if (act === 'misa-filter') { S.misaFilter = k; render(); }
   else if (act === 'edit-misa') openMisa(S.misa.find(m => m.id === id));
   else if (act === 'edit-smk') openSmk(S.smk.find(g => g.id === id));
@@ -1983,6 +2014,104 @@ async function autoPetugasWilayah() {
   render();
   const left = S.petugas.filter(p => p.active && !petugasWilayah(p)).length;
   toast(`${rows.length} petugas diisi wilayahnya${left ? ` · ${left} belum (atur manual)` : ''}`);
+}
+
+/* ---- Absen petugas misa (koordinator) ---- */
+const misaTitle = m => `${m.slot === 'LAIN' ? (m.title || 'Misa') : `${m.slot} ${slotLabel(m.slot)}`} · ${fmtShort(m.date)}`;
+// Admin, atau akun yang ditautkan ke nama koordinator misa itu
+const canCoordinate = m => S.admin || !!(S.me?.petugas && m.coordinator && norm(m.coordinator) === norm(S.me.petugas));
+const attOf = m => S.attendance.filter(a => a.misa_id === m.id);
+function attSummary(m) {
+  const at = attOf(m);
+  if (!at.length) return '';
+  const hadir = m.officers.filter(n => at.find(a => norm(a.petugas) === norm(n))?.present).length;
+  return ` · <span class="tag ${hadir === m.officers.length ? 'ok' : 'warn'}">Hadir ${hadir}/${m.officers.length}</span>`;
+}
+// Hantaran yang berangkat setelah misa ini (grup SMK slot sama, minggu yang sama)
+function hantaranOfMisa(m) {
+  const out = [];
+  for (const g of S.smk) g.officers.forEach((n, i) => { if (n && linkedMisa(g.slot, i)?.id === m.id) out.push({ g, n }); });
+  return out;
+}
+
+function renderKoor(main) {
+  const m = S.misa.find(x => x.id === S.koorMisa);
+  if (!m) { S.tab = 'saya'; return render(); }
+  if (!S.koorDraft) {
+    const at = attOf(m);
+    S.koorDraft = new Map(m.officers.map(n => [n, !!at.find(a => norm(a.petugas) === norm(n))?.present]));
+  }
+  for (const n of m.officers) if (!S.koorDraft.has(n)) S.koorDraft.set(n, true); // pengganti baru → hadir
+  for (const n of [...S.koorDraft.keys()]) if (!m.officers.includes(n)) S.koorDraft.delete(n);
+  const at = attOf(m), hadir = [...S.koorDraft.values()].filter(Boolean).length;
+  const hant = hantaranOfMisa(m);
+  const row = n => {
+    const on = S.koorDraft.get(n), a = at.find(x => norm(x.petugas) === norm(n));
+    const hg = hant.filter(x => norm(x.n) === norm(n)).map(x => `Hantaran grup ${x.g.no}`);
+    return `<div class="koor-row ${on ? 'on' : ''}">
+      <button type="button" class="koor-check" data-act="koor-toggle" data-k="${h(n)}" aria-pressed="${on}">${on ? '✓' : ''}</button>
+      <div class="mi" data-act="koor-toggle" data-k="${h(n)}"><span class="nm">${h(n)}</span>${norm(n) === norm(m.coordinator) ? ' <span class="tag">Koordinator</span>' : ''}
+        ${a?.substitute_for ? `<span class="tag ok">pengganti ${h(a.substitute_for)}</span>` : ''}${hg.map(t => ` <span class="tag wil">${h(t)}</span>`).join('')}</div>
+      <button type="button" class="btn small" data-act="koor-ganti" data-k="${h(n)}">Ganti</button>
+    </div>`;
+  };
+  const replaced = at.filter(a => !a.present && a.note.startsWith('diganti'));
+  main.innerHTML = `<div class="koor">
+    <button class="back" data-act="koor-back">‹ Kembali</button>
+    <div class="koor-head">
+      <div class="hint">Absen petugas · koordinator ${h(m.coordinator || '—')}</div>
+      <h2>${h(misaTitle(m))}</h2>
+      <div class="sub">${m.time ? `pk ${h(m.time)}` : ''}${m.place ? ` · ${h(m.place)}` : ''}</div>
+      <div class="koor-count"><b>${hadir}</b> / ${m.officers.length} hadir${m.need ? ` <span class="hint">(butuh ${m.need})</span>` : ''}</div>
+    </div>
+    <div class="btns"><button class="btn small" data-act="koor-all">Tandai semua hadir</button></div>
+    <div class="list koor-list">${m.officers.map(row).join('') || '<div class="empty-state small">Belum ada petugas di misa ini.</div>'}</div>
+    ${replaced.length ? `<div class="hint" style="margin:8px 2px">Diganti: ${replaced.map(a => `${h(a.petugas)} (${h(a.note)})`).join(', ')}</div>` : ''}
+    ${hant.length ? `<div class="sec-title">🕊️ Lanjut hantaran setelah misa <span class="count">${hant.length}</span></div>
+      <div class="list">${hant.map(({ g, n }) => `<div class="asg"><div><b>${h(n)}</b> → grup ${h(g.no)} · ${mem(g).length} umat
+        ${groupWilayah(g).map(w => `<span class="tag wil">${h(w.nama)}</span>`).join('')}</div></div>`).join('')}</div>` : ''}
+    <button class="btn primary koor-save" data-act="koor-save">💾 Simpan absen</button>
+  </div>`;
+}
+
+async function saveKoor() {
+  const m = S.misa.find(x => x.id === S.koorMisa);
+  const at = attOf(m);
+  const rows = m.officers.map(n => {
+    const a = at.find(x => norm(x.petugas) === norm(n));
+    return { ...(a || { id: uid(), substitute_for: '', note: '' }), misa_id: m.id, month_id: m.month_id, petugas: n, present: !!S.koorDraft.get(n), checked_by: S.userId || null, checked_at: new Date().toISOString() };
+  });
+  await store.upsert('attendance', rows);
+  S.attendance = [...S.attendance.filter(a => !rows.some(r => r.id === a.id)), ...rows];
+  const hadir = rows.filter(r => r.present).length;
+  toast(`Absen tersimpan · ${hadir}/${rows.length} hadir`);
+  renderKoor($('#main'));
+}
+
+// Pilih pengganti: petugas aktif, belum di misa ini, bisa di slot & tanggal itu; yang tidak bertugas hari itu didahulukan
+function openGanti(oldN) {
+  const m = S.misa.find(x => x.id === S.koorMisa);
+  const busy = new Set(S.misa.filter(x => x.date === m.date).flatMap(x => x.officers.map(norm)));
+  const cands = S.petugas.filter(p => p.active && !m.officers.some(o => norm(o) === norm(p.nama)) && !unavailable(p.nama, m.date, m.slot))
+    .sort((a, b) => busy.has(norm(a.nama)) - busy.has(norm(b.nama)) || a.nama.localeCompare(b.nama));
+  const free = cands.filter(p => !busy.has(norm(p.nama))), other = cands.filter(p => busy.has(norm(p.nama)));
+  const grp = (label, l) => (l.length ? `<optgroup label="${h(label)}">${l.map(p => opt(p.nama, `${p.nama}${petugasWilayah(p) ? ` · ${petugasWilayah(p).nama}` : ''}`, null)).join('')}</optgroup>` : '');
+  const body = `<p>Ganti <b>${h(oldN)}</b> yang berhalangan di ${h(misaTitle(m))}:</p>
+    <label class="fld">Pengganti<select name="pengganti" required>${opt('', '— pilih pengganti —', '')}${grp('Tidak bertugas hari ini', free)}${grp('Sudah bertugas di misa lain hari ini', other)}</select></label>
+    <p class="hint">${h(oldN)} dicatat tidak hadir, pengganti dicatat hadir, dan jadwal misa langsung diperbarui.</p>`;
+  openSheet('Ganti petugas', body, {
+    saveLabel: 'Ganti',
+    save: async fd => {
+      const newN = fd.get('pengganti');
+      if (!newN) throw new Error('Pilih pengganti dulu');
+      await store.replaceOfficer(m.id, oldN, newN);
+      const [ms, at] = await Promise.all([store.list('misa', S.monthId), store.list('attendance', S.monthId)]);
+      S.misa = ms; S.attendance = at;
+      if (S.koorDraft) { S.koorDraft.delete(oldN); S.koorDraft.set(newN, true); }
+      renderKoor($('#main'));
+      toast(`${oldN} diganti ${newN}`);
+    },
+  });
 }
 
 /* ---- Isi otomatis petugas misa yang kurang ---- */
