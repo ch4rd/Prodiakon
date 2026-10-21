@@ -369,7 +369,8 @@ function render() {
   $('#cekCount').textContent = n ? String(n) : '';
 
   const main = $('#main');
-  if (!S.monthId) { main.innerHTML = emptyState(); return; }
+  const masterView = (S.tab === 'smk' && ['wilayah', 'umat'].includes(S.smkView)) || (S.tab === 'petugas' && S.petugasView === 'master');
+  if (!S.monthId && !masterView) { main.innerHTML = emptyState(); return; }
   if (S.tab === 'koor') renderKoor(main);
   else if (S.tab === 'saya') renderSaya(main);
   else if (S.tab === 'misa') renderMisa(main);
@@ -1332,6 +1333,11 @@ function openMenu() {
     S.admin && ['import', '📥 Import dari backup JSON'],
     S.admin && hasSeedData() && !hasSeed && ['load-seed', '🧾 Muat data Oktober 2026'],
     ONLINE && S.admin && ['users', `👥 Pengguna${S.pendingUsers ? ` (${S.pendingUsers} menunggu)` : ''}`],
+    ['#', 'Master data'],
+    ['go-wilayah', `🗺️ Wilayah & lingkungan (${S.wilayah.length} wilayah · ${S.lingkungan.length} lingkungan)`],
+    ['go-umat', `🏠 Master umat (${S.umat.filter(u => u.active).length})`],
+    ['go-petugas', `👤 Master petugas (${masterNames().length})`],
+    ['#', 'Pengaturan'],
     S.admin && ['paroki-settings', '⛪ Pengaturan paroki (nama, jam misa)'],
     S.admin && ['absences', `🚫 Petugas berhalangan${upcomingAbsences().length ? ` (${upcomingAbsences().length})` : ''}`],
     S.admin && ['sponsor', `🤝 Sponsor${S.sponsor.length ? ` (${activeSponsors().length} tayang)` : ''}`],
@@ -1339,7 +1345,8 @@ function openMenu() {
     ONLINE && ['profile', '👤 Profil saya'],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
-  const body = `<div class="menu-list">${items.map(([k, l]) => `<button type="button" data-sh="menu" data-k="${k}">${h(l)}</button>`).join('')}</div>
+  const body = `<div class="menu-list">${items.map(([k, l]) => (k === '#' ? `<div class="menu-sec">${h(l)}</div>`
+    : `<button type="button" data-sh="menu" data-k="${k}">${h(l)}</button>`)).join('')}</div>
     <p class="hint">Paroki: <b>${h(P.nama)}</b>${P.kota ? ` · ${h(P.kota)}` : ''}</p>
     <p class="hint">Mode: ${ONLINE ? `Online (Supabase) · ${S.super ? 'Super admin' : S.admin ? 'Admin – bisa mengubah' : 'Lihat saja – hanya admin yang bisa mengubah'}` : 'Lokal – data hanya di perangkat ini. Isi config.js untuk menyambung ke Supabase.'}</p>`;
   openSheet('Menu', body, {
@@ -1349,6 +1356,8 @@ function openMenu() {
 
 async function menuAction(k) {
   if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users', 'paroki-settings', 'sponsor', 'absences'].includes(k)) return;
+  if (k === 'go-wilayah' || k === 'go-umat') { S.tab = 'smk'; S.smkView = k === 'go-wilayah' ? 'wilayah' : 'umat'; S.person = null; lsSet('prodiakon.tab', S.tab); lsSet('prodiakon.smkView', S.smkView); render(); window.scrollTo(0, 0); return; }
+  if (k === 'go-petugas') { S.tab = 'petugas'; S.petugasView = 'master'; S.person = null; lsSet('prodiakon.tab', S.tab); render(); window.scrollTo(0, 0); return; }
   if (k === 'users') return run(openUsers);
   if (k === 'profile') return openProfile();
   if (k === 'paroki-settings') return openParokiForm(P);

@@ -287,3 +287,4 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .koor-check { flex: none; width: 40px; height: 40px; border-radius: 10px; border: 2px solid var(--line); background: #fff; font-size: 1.4rem; font-weight: 700; color: #fff; cursor: pointer; }
 .koor-row.on .koor-check { background: var(--brand); border-color: var(--brand); }
 .koor-save { width: 100%; margin: 14px 0 8px; padding: 14px; font-size: 1.05rem; }
+.menu-sec { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 10px 4px 2px; }
