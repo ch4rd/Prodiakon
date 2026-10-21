@@ -438,7 +438,10 @@ function misaCard(m, highlight) {
       ${chips ? `<div class="chips">${chips}</div>` : '<span class="count">Belum ada petugas</span>'}
       ${m.note ? `<div class="note">📝 ${h(m.note)}</div>` : ''}
       <div class="count" style="margin-top:6px">${m.officers.length} petugas${m.need ? ` / butuh ${m.need}` : ''}${attSummary(m)}</div>
-      ${canCoordinate(m) && m.date <= todayIso() ? `<div class="btns" style="margin-top:6px"><button class="btn small" data-act="koor" data-id="${h(m.id)}">📋 Absen petugas</button></div>` : ''}
+      <div class="btns" style="margin-top:6px">
+        <button class="btn small" data-act="share-misa" data-id="${h(m.id)}">📤 Bagikan</button>
+        ${canCoordinate(m) && m.date <= todayIso() ? `<button class="btn small" data-act="koor" data-id="${h(m.id)}">📋 Absen petugas</button>` : ''}
+      </div>
     </div>
   </article>`;
 }
@@ -1497,6 +1500,7 @@ $('#main').addEventListener('click', e => {
   if (act === 'new-wil') { if (S.admin) openWilayahForm(); return; }
   if (act === 'petugas-wil-auto') { if (S.admin) run(autoPetugasWilayah); return; }
   if (act === 'new-ling') { if (S.admin) openLingkunganForm(k ? { wilayah_id: k } : undefined); return; }
+  if (act === 'share-misa') { const m = S.misa.find(x => x.id === id); if (m) run(() => openMisaPoster(m)); return; }
   if (act === 'auto-fill') { if (S.admin) openAutoFill(); return; }
   if (act === 'koor') { const m = S.misa.find(x => x.id === id); if (m && canCoordinate(m)) { S.prevTab = S.tab; S.tab = 'koor'; S.koorMisa = id; S.koorDraft = null; render(); window.scrollTo(0, 0); } return; }
   if (act === 'koor-back') { S.tab = S.prevTab && S.prevTab !== 'koor' ? S.prevTab : 'saya'; S.koorMisa = null; render(); return; }
@@ -2023,6 +2027,136 @@ async function autoPetugasWilayah() {
   render();
   const left = S.petugas.filter(p => p.active && !petugasWilayah(p)).length;
   toast(`${rows.length} petugas diisi wilayahnya${left ? ` · ${left} belum (atur manual)` : ''}`);
+}
+
+/* ---- Poster jadwal misa (PNG / PDF untuk WhatsApp) ---- */
+const loadImg = src => new Promise(ok => { if (!src) return ok(null); const i = new Image(); i.onload = () => ok(i); i.onerror = () => ok(null); i.src = src; });
+// Warna teks yang terbaca di atas warna liturgi
+const LIT_TEXT = { putih: '#334155', '': '#3f3f00' };
+
+async function drawMisaPoster(m) {
+  const W = 1080, PAD = 64;
+  const col = COLORS[m.color] || COLORS[''];
+  const koor = norm(m.coordinator);
+  const offs = [...m.officers].sort((a, b) => (norm(b) === koor) - (norm(a) === koor));
+  const hant = hantaranOfMisa(m);
+  const logo = await loadImg(P.logo || 'icons/icon-192.png');
+  const FONT = '"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
+  const font = (wt, px) => `${wt} ${px}px ${FONT}`;
+  // ukur tinggi dulu
+  const cols = 2, rowH = 70, rows = Math.max(1, Math.ceil(offs.length / cols));
+  const hantH = hant.length ? 90 + hant.length * 56 : 0;
+  const noteH = m.note ? 90 : 0;
+  const H = 360 + 330 + 90 + rows * rowH + 40 + hantH + noteH + 150; // sama dengan urutan gambar di bawah
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  const rr = (x, y, w, hh, r) => { g.beginPath(); g.roundRect ? g.roundRect(x, y, w, hh, r) : g.rect(x, y, w, hh); };
+  const fit = (text, max, f) => { g.font = f; let t = String(text); while (t.length > 1 && g.measureText(t).width > max) t = t.slice(0, -2) + '…'; return t; };
+
+  // latar
+  g.fillStyle = '#f5f2ea'; g.fillRect(0, 0, W, H);
+  // header
+  const grd = g.createLinearGradient(0, 0, W, 300); grd.addColorStop(0, '#14532d'); grd.addColorStop(1, '#166534');
+  g.fillStyle = grd; g.fillRect(0, 0, W, 300);
+  g.globalAlpha = .08; g.fillStyle = '#fff';
+  for (let i = 0; i < 6; i++) { g.beginPath(); g.arc(W - 120 + i * 10, -40 + i * 60, 160 - i * 18, 0, Math.PI * 2); g.fill(); }
+  g.globalAlpha = 1;
+  if (logo) { g.save(); g.beginPath(); g.arc(PAD + 70, 150, 70, 0, Math.PI * 2); g.fillStyle = '#fff'; g.fill(); g.clip(); g.drawImage(logo, PAD + 10, 90, 120, 120); g.restore(); }
+  const tx = logo ? PAD + 170 : PAD;
+  g.fillStyle = 'rgba(255,255,255,.75)'; g.font = font(600, 30); g.fillText('JADWAL PETUGAS PRODIAKON', tx, 120);
+  g.fillStyle = '#fff'; g.fillText(fit(P.nama, W - tx - PAD, font(800, 64)), tx, 192);
+  if (P.kota) { g.fillStyle = 'rgba(255,255,255,.8)'; g.font = font(400, 30); g.fillText(fit(P.kota, W - tx - PAD, font(400, 30)), tx, 240); }
+  // garis warna liturgi
+  g.fillStyle = col[1]; g.fillRect(0, 300, W, 18);
+
+  // kartu misa
+  let y = 360;
+  g.fillStyle = '#fff'; rr(PAD - 16, y - 20, W - 2 * PAD + 32, 300, 28); g.fill();
+  g.fillStyle = '#64748b'; g.font = font(600, 30);
+  g.fillText(m.slot === 'LAIN' ? 'MISA KHUSUS' : `MISA ${m.slot}`, PAD + 16, y + 30);
+  g.fillStyle = '#0f172a'; g.fillText(fit(fmtLong(m.date) + ' ' + parseD(m.date).getFullYear(), W - 2 * PAD - 32, font(800, 58)), PAD + 16, y + 110);
+  g.fillStyle = '#14532d'; g.fillText(fit(m.title || slotLabel(m.slot), W - 2 * PAD - 32, font(700, 40)), PAD + 16, y + 170);
+  g.fillStyle = '#334155'; g.font = font(500, 34);
+  g.fillText(fit([m.time && `Pukul ${m.time}`, m.place].filter(Boolean).join('  ·  ') || ' ', W - 2 * PAD - 260, font(500, 34)), PAD + 16, y + 230);
+  if (m.color) { // label warna liturgi
+    g.font = font(700, 28); const lw = g.measureText(col[0]).width + 48;
+    g.fillStyle = col[1]; rr(W - PAD - lw - 16, y + 196, lw, 48, 24); g.fill();
+    g.fillStyle = LIT_TEXT[m.color] || '#fff'; g.fillText(col[0], W - PAD - lw + 8, y + 230);
+  }
+  y += 330;
+
+  // petugas
+  g.fillStyle = '#14532d'; g.font = font(800, 38); g.fillText(`Petugas (${offs.length}${m.need ? `/${m.need}` : ''})`, PAD, y + 40);
+  y += 90;
+  const cw = (W - 2 * PAD) / cols;
+  offs.forEach((n, i) => {
+    const cx = PAD + (i % cols) * cw, cy = y + Math.floor(i / cols) * rowH;
+    const isK = norm(n) === koor;
+    g.fillStyle = isK ? '#fef3c7' : '#fff'; rr(cx, cy, cw - 20, rowH - 14, 16); g.fill();
+    g.fillStyle = isK ? '#b45309' : '#14532d'; g.beginPath(); g.arc(cx + 34, cy + (rowH - 14) / 2, 20, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff'; g.font = font(700, 22); g.textAlign = 'center'; g.fillText(isK ? '★' : String(i + (koor && offs.some(x => norm(x) === koor) ? 0 : 1)), cx + 34, cy + (rowH - 14) / 2 + 8); g.textAlign = 'left';
+    g.fillStyle = '#0f172a'; g.fillText(fit(n + (isK ? ' (koordinator)' : ''), cw - 110, font(isK ? 700 : 500, 30)), cx + 70, cy + (rowH - 14) / 2 + 11);
+  });
+  if (!offs.length) { g.fillStyle = '#94a3b8'; g.font = font(500, 30); g.fillText('Belum ada petugas', PAD, y + 40); }
+  y += rows * rowH + 40;
+
+  // hantaran
+  if (hant.length) {
+    g.fillStyle = '#14532d'; g.font = font(800, 38); g.fillText('Antar SMK setelah misa', PAD, y + 40);
+    y += 90;
+    for (const { g: grp, n } of hant) {
+      const wil = groupWilayah(grp).map(w => w.nama).join(', ');
+      g.fillStyle = '#0f172a'; g.font = font(700, 30); const nm = fit(n, 420, font(700, 30)); g.fillText(nm, PAD, y + 34);
+      const nw = g.measureText(nm).width;
+      g.fillStyle = '#475569'; g.font = font(400, 30);
+      g.fillText(fit(`→ Grup ${grp.no}${wil ? ` · ${wil}` : ''} · ${mem(grp).length} umat`, W - 2 * PAD - nw - 20, font(400, 30)), PAD + nw + 16, y + 34);
+      y += 56;
+    }
+  }
+  if (m.note) { g.fillStyle = '#334155'; g.font = font(500, 30); g.fillText(fit('Catatan: ' + m.note, W - 2 * PAD, font(500, 30)), PAD, y + 50); y += noteH; }
+
+  // footer
+  g.fillStyle = '#14532d'; g.fillRect(0, H - 110, W, 110);
+  g.fillStyle = '#fff'; g.font = font(600, 28);
+  g.fillText(fit(`Jadwal lengkap: ${location.host}${location.pathname}`.replace(/\/$/, ''), W - 2 * PAD - 260, font(600, 28)), PAD, H - 48);
+  g.fillStyle = 'rgba(255,255,255,.7)'; g.font = font(400, 24); g.textAlign = 'right';
+  g.fillText(`Dibuat ${fmtShort(todayIso())}`, W - PAD, H - 48); g.textAlign = 'left';
+  return c;
+}
+
+async function openMisaPoster(m) {
+  const c = await drawMisaPoster(m);
+  const url = c.toDataURL('image/png');
+  const fname = `jadwal-${(m.slot === 'LAIN' ? 'misa' : m.slot).toLowerCase()}-${m.date}`;
+  const body = `<img class="poster-prev" src="${url}" alt="Poster jadwal misa">
+    <div class="btns poster-btns">
+      <button type="button" class="btn primary" data-sh="ps-share">📤 Bagikan (WhatsApp)</button>
+      <button type="button" class="btn" data-sh="ps-png">⬇️ Unduh PNG</button>
+      <button type="button" class="btn" data-sh="ps-pdf">📄 Unduh PDF</button>
+    </div>
+    <p class="hint">Alamat & nomor umat tidak ditampilkan di gambar.</p>`;
+  const blob = () => new Promise(ok => c.toBlob(ok, 'image/png'));
+  openSheet(misaTitle(m), body, {
+    onClick: b => run(async () => {
+      if (b.dataset.sh === 'ps-png') { const a = document.createElement('a'); a.href = url; a.download = fname + '.png'; a.click(); }
+      else if (b.dataset.sh === 'ps-pdf') await downloadPosterPdf(c, fname);
+      else if (b.dataset.sh === 'ps-share') {
+        const file = new File([await blob()], fname + '.png', { type: 'image/png' });
+        const text = `Jadwal petugas ${misaTitle(m)} – Prodiakon ${P.nama}`;
+        if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file], text }).catch(e => { if (e.name !== 'AbortError') throw e; });
+        else { const a = document.createElement('a'); a.href = url; a.download = fname + '.png'; a.click(); toast('Perangkat ini belum bisa berbagi gambar langsung — gambar diunduh, lalu kirim lewat WhatsApp'); }
+      }
+    }),
+  });
+}
+
+async function downloadPosterPdf(c, fname) {
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  const { jsPDF } = window.jspdf;
+  const wmm = 148, hmm = wmm * c.height / c.width; // lebar A5, tinggi mengikuti gambar
+  const pdf = new jsPDF({ unit: 'mm', format: [wmm, hmm], orientation: hmm > wmm ? 'portrait' : 'landscape' });
+  pdf.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, wmm, hmm);
+  pdf.save(fname + '.pdf');
 }
 
 /* ---- Absen petugas misa (koordinator) ---- */

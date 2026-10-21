@@ -288,3 +288,6 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .koor-row.on .koor-check { background: var(--brand); border-color: var(--brand); }
 .koor-save { width: 100%; margin: 14px 0 8px; padding: 14px; font-size: 1.05rem; }
 .menu-sec { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); padding: 10px 4px 2px; }
+/* Poster misa */
+.poster-prev { width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--line); display: block; }
+.poster-btns { flex-wrap: wrap; }
