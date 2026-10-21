@@ -924,8 +924,19 @@ function openSheet(title, body, { save, del, saveLabel = 'Simpan', onClick } = {
       <button type="button" class="btn" data-sh="close">Batal</button>
       ${save ? `<button type="submit" class="btn primary">${h(saveLabel)}</button>` : ''}
     </div>` : ''}`;
+  // Validasi ditangani sendiri: di Safari iPhone pesan validasi bawaan sering tidak tampil di dalam dialog,
+  // sehingga tombol Simpan terlihat tidak bereaksi.
+  f.noValidate = true;
   f.onsubmit = async e => {
     e.preventDefault();
+    const bad = [...f.elements].find(el => el.willValidate && !el.checkValidity());
+    if (bad) {
+      const label = (bad.closest('label')?.childNodes[0]?.textContent || bad.name || 'Isian').trim();
+      toast(bad.validity.valueMissing ? `${label} wajib diisi` : `${label}: ${bad.validationMessage}`);
+      bad.classList.add('invalid'); bad.focus?.(); bad.scrollIntoView?.({ block: 'center' });
+      bad.addEventListener('input', () => bad.classList.remove('invalid'), { once: true });
+      return;
+    }
     const ok = await run(() => save(new FormData(f), f));
     if (ok !== false) dlg.close();
   };
@@ -953,7 +964,7 @@ function openMisa(m) {
     <label class="fld">Jenis misa<select name="slot">${MISA_SLOTS.map(s => opt(s.key, s.key === 'LAIN' ? 'Misa khusus / lainnya' : `${s.key} · ${s.label}`, m.slot)).join('')}</select></label>
     <div class="grid2 date-row">
       <label class="fld">Tanggal<input type="date" name="date" required value="${h(m.date)}"></label>
-      <label class="fld">Jam<input type="time" name="time" step="300" value="${h(toTimeInput(m.time || slotByKey(m.slot)?.time || ''))}"></label>
+      <label class="fld">Jam<input type="time" name="time" value="${h(toTimeInput(m.time || slotByKey(m.slot)?.time || ''))}"></label>
     </div>
     <label class="fld">Nama misa / perayaan<input name="title" value="${h(m.title)}" placeholder="Minggu Biasa"></label>
     <div class="grid2">
