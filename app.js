@@ -386,6 +386,9 @@ function renderMisa(main) {
   }).join('');
   const list = S.misa.filter(m => f === 'ALL' || m.slot === f).sort(cmpMisa);
   let html = `<div class="bar">${pills}</div>`;
+  const kurang = S.admin ? shortMisa().reduce((a, m) => a + (m.need - m.officers.length), 0) : 0;
+  if (kurang) html += `<div class="push-cta">🎲 ${kurang} tempat petugas misa belum terisi.
+    <button class="btn small primary" data-act="auto-fill">Isi otomatis</button></div>`;
   if (!list.length) html += '<div class="empty-state">Belum ada jadwal misa. Tekan ＋ untuk menambah.</div>';
   let last = '';
   for (const m of list) {
@@ -1460,6 +1463,7 @@ $('#main').addEventListener('click', e => {
   if (act === 'new-wil') { if (S.admin) openWilayahForm(); return; }
   if (act === 'petugas-wil-auto') { if (S.admin) run(autoPetugasWilayah); return; }
   if (act === 'new-ling') { if (S.admin) openLingkunganForm(k ? { wilayah_id: k } : undefined); return; }
+  if (act === 'auto-fill') { if (S.admin) openAutoFill(); return; }
   if (act === 'misa-filter') { S.misaFilter = k; render(); }
   else if (act === 'edit-misa') openMisa(S.misa.find(m => m.id === id));
   else if (act === 'edit-smk') openSmk(S.smk.find(g => g.id === id));
@@ -1979,6 +1983,69 @@ async function autoPetugasWilayah() {
   render();
   const left = S.petugas.filter(p => p.active && !petugasWilayah(p)).length;
   toast(`${rows.length} petugas diisi wilayahnya${left ? ` · ${left} belum (atur manual)` : ''}`);
+}
+
+/* ---- Isi otomatis petugas misa yang kurang ---- */
+// Misa yang belum lewat dan petugasnya kurang dari jumlah dibutuhkan
+const shortMisa = () => S.misa.filter(m => m.date >= todayIso() && (m.need || 0) > m.officers.length);
+// Kunci "minggu": hari Minggu pada/after tanggal itu (akhir pekan Sabtu–Minggu jadi satu)
+const weekKey = d => { const x = parseD(d); x.setDate(x.getDate() + ((7 - x.getDay()) % 7)); return iso(x); };
+
+// Rencana pengisian: misa rutin (Sabtu–Minggu) didahulukan, lalu misa lainnya.
+// Calon = petugas aktif yang belum bertugas (misa/hantaran) di minggu itu, tidak berhalangan & tidak
+// terkena pengecualian slot. Yang paling sedikit tugasnya bulan ini didahulukan, acak di antara yang sama.
+function planAutoFill() {
+  const weekOf = new Map(), monthCount = new Map();
+  const mark = (n, wk) => {
+    const k = norm(n);
+    if (!weekOf.has(wk)) weekOf.set(wk, new Set());
+    weekOf.get(wk).add(k);
+    monthCount.set(k, (monthCount.get(k) || 0) + 1);
+  };
+  for (const m of S.misa) for (const n of m.officers) mark(n, weekKey(m.date));
+  for (const g of S.smk) g.officers.forEach((n, i) => { const d = smkDay(g.slot, i); if (n && d) mark(n, weekKey(d)); });
+  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const todo = shortMisa().sort((a, b) => (REGULAR.includes(b.slot) - REGULAR.includes(a.slot)) || cmpMisa(a, b));
+  const plan = [];
+  for (const m of todo) {
+    const wk = weekKey(m.date), taken = weekOf.get(wk) || new Set();
+    const cands = shuffle(S.petugas.filter(p => p.active && !taken.has(norm(p.nama)) && !unavailable(p.nama, m.date, m.slot)))
+      .sort((a, b) => (monthCount.get(norm(a.nama)) || 0) - (monthCount.get(norm(b.nama)) || 0));
+    const pick = cands.slice(0, (m.need || 0) - m.officers.length).map(p => p.nama);
+    pick.forEach(n => mark(n, wk));
+    plan.push({ misa: m, add: pick, still: (m.need || 0) - m.officers.length - pick.length });
+  }
+  return plan;
+}
+
+function openAutoFill() {
+  let plan = planAutoFill();
+  const draw = () => {
+    const total = plan.reduce((a, x) => a + x.add.length, 0), still = plan.reduce((a, x) => a + x.still, 0);
+    return `<p class="hint">Petugas dipilih acak dari yang <b>belum bertugas di minggu itu</b> (misa & hantaran), tidak berhalangan,
+        dan bisa di slot tersebut. Misa Sabtu–Minggu didahulukan; yang paling sedikit tugasnya bulan ini diprioritaskan.</p>
+      <div class="sec-title">${total} petugas akan ditambahkan${still ? ` <span class="tag warn">${still} tempat masih kosong</span>` : ''}</div>
+      <div class="list">${plan.map(x => `<div class="asg">
+        <div class="d">${h(fmtShort(x.misa.date))} · ${h(x.misa.slot === 'LAIN' ? x.misa.title : `${x.misa.slot} ${slotLabel(x.misa.slot)}`)} ·
+          ${x.misa.officers.length + x.add.length}/${x.misa.need} petugas</div>
+        <div class="chips">${x.add.map(n => `<span class="chip">＋ ${h(n)}</span>`).join('') || '<span class="hint">Tidak ada calon yang tersedia</span>'}</div>
+        ${x.still ? `<div class="ad warn">⚠️ Masih kurang ${x.still} — tidak ada petugas lain yang tersedia di minggu itu</div>` : ''}
+      </div>`).join('')}</div>
+      <div class="btns"><button type="button" class="btn small" data-sh="af-again">🎲 Acak ulang</button></div>`;
+  };
+  if (!plan.length) { toast('Semua misa yang belum lewat sudah cukup petugasnya'); return; }
+  openSheet('Isi otomatis petugas misa', `<div id="afBody">${draw()}</div>`, {
+    saveLabel: 'Terapkan',
+    save: async () => {
+      const rows = plan.filter(x => x.add.length).map(x => ({ ...x.misa, officers: [...x.misa.officers, ...x.add] }));
+      if (!rows.length) { toast('Tidak ada petugas yang bisa ditambahkan'); return false; }
+      await store.upsert('misa', rows);
+      S.misa = S.misa.map(m => rows.find(r => r.id === m.id) || m);
+      render();
+      toast(`${rows.reduce((a, r) => a + r.officers.length, 0) - plan.filter(x => x.add.length).reduce((a, x) => a + x.misa.officers.length, 0)} petugas ditambahkan ke ${rows.length} misa`);
+    },
+    onClick: b => { if (b.dataset.sh === 'af-again') { plan = planAutoFill(); $('#afBody').innerHTML = draw(); } },
+  });
 }
 
 /* ---- Petugas berhalangan ---- */
