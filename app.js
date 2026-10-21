@@ -964,7 +964,10 @@ function openMisa(m) {
     <div class="fld">Petugas <span id="offCount"></span></div>
     <div class="chips" id="offChips"></div>
     <div id="offAbsent"></div>
-    <label class="fld">Tambah petugas (dari Master petugas)<select id="addName"></select></label>
+    <div class="grid2" style="grid-template-columns:minmax(0,1fr) auto;align-items:end">
+      <label class="fld">Tambah petugas (dari Master petugas)<select id="addName"></select></label>
+      <button type="button" class="btn" data-sh="rand-off" title="Ambil petugas yang paling sedikit bertugas bulan ini">🎲 Isi acak</button>
+    </div>
     <label class="fld">Koordinator<select name="coordinator"></select></label>
     <label class="fld">Catatan<input name="note" value="${h(m.note)}"></label>`;
   openSheet(isNew ? 'Tambah misa' : 'Ubah misa', body, {
@@ -986,6 +989,14 @@ function openMisa(m) {
     },
     onClick: b => {
       if (b.dataset.sh === 'rm-off') { officers.splice(Number(b.dataset.i), 1); renderOfficers(); }
+      else if (b.dataset.sh === 'rand-off') {
+        const f = $('#sheetForm'), need = Number(f.elements.need.value) || 0;
+        const n = Math.max(1, need - officers.length);
+        const picks = randomPetugas(n, { date: f.elements.date.value, slot: f.elements.slot.value, exclude: officers, misaId: m.id });
+        if (!picks.length) { toast('Tidak ada petugas lain yang tersedia di akhir pekan ini'); return; }
+        officers.push(...picks); renderOfficers();
+        toast(`${picks.length} petugas ditambahkan acak${picks.length < n ? ` (kurang ${n - picks.length}, tidak ada yang tersedia)` : ''}`);
+      }
     },
   });
   const f = $('#sheetForm');
@@ -2521,6 +2532,28 @@ function openHantaranFill() {
     },
     onClick: b => { if (b.dataset.sh === 'hf-again') { plan = planHantaranFill(); $('#hfBody').innerHTML = draw(); } },
   });
+}
+
+/* ---- Pilih petugas acak untuk satu misa ---- */
+// Calon: aktif, belum di misa ini, tersedia di tanggal & slot, belum bertugas (misa lain / hantaran) di akhir pekan itu.
+// Urut: paling sedikit tugas bulan ini (misa + hantaran), acak di antara yang sama.
+function randomPetugas(n, { date, slot, exclude = [], misaId = null }) {
+  const wk = date ? weekKey(date) : '', ex = new Set(exclude.map(norm)), busy = new Set(), cnt = new Map();
+  const inc = k => cnt.set(k, (cnt.get(k) || 0) + 1);
+  for (const m of S.misa) {
+    if (m.id === misaId) continue;
+    for (const o of m.officers) { inc(norm(o)); if (wk && weekKey(m.date) === wk) busy.add(norm(o)); }
+  }
+  for (const g of S.smk) g.officers.forEach((o, i) => {
+    if (!o) return;
+    inc(norm(o));
+    const d = smkDay(g.slot, i);
+    // petugas hantaran di jam misa INI boleh (memang harus ikut misa ini); hantaran jam lain → sibuk
+    if (wk && d && weekKey(d) === wk && !(g.slot === slot && d === date)) busy.add(norm(o));
+  });
+  const pool = S.petugas.filter(p => p.active && !ex.has(norm(p.nama)) && !busy.has(norm(p.nama)) && !unavailable(p.nama, date, slot));
+  for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+  return pool.sort((a, b) => (cnt.get(norm(a.nama)) || 0) - (cnt.get(norm(b.nama)) || 0)).slice(0, n).map(p => p.nama);
 }
 
 /* ---- Isi otomatis petugas misa yang kurang ---- */
