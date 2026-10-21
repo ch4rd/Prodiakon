@@ -1352,6 +1352,7 @@ function openMenu() {
     S.admin && ['absences', `🚫 Petugas berhalangan${upcomingAbsences().length ? ` (${upcomingAbsences().length})` : ''}`],
     S.admin && ['sponsor', `🤝 Sponsor${S.sponsor.length ? ` (${activeSponsors().length} tayang)` : ''}`],
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
+    S.months.length && ['reports', '📑 Laporan (PDF)'],
     ONLINE && ['profile', '👤 Profil saya'],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
@@ -1370,6 +1371,7 @@ async function menuAction(k) {
   if (k === 'go-petugas') { S.tab = 'petugas'; S.petugasView = 'master'; S.person = null; lsSet('prodiakon.tab', S.tab); render(); window.scrollTo(0, 0); return; }
   if (k === 'users') return run(openUsers);
   if (k === 'profile') return openProfile();
+  if (k === 'reports') return openReports();
   if (k === 'paroki-settings') return openParokiForm(P);
   if (k === 'sponsor') return openSponsorList();
   if (k === 'absences') return openAbsenceList();
@@ -2162,6 +2164,151 @@ async function openMisaPoster(m) {
         else { const a = document.createElement('a'); a.href = url; a.download = fname + '.png'; a.click(); toast('Perangkat ini belum bisa berbagi gambar langsung — gambar diunduh, lalu kirim lewat WhatsApp'); }
       }
     }),
+  });
+}
+
+/* ---- Laporan bulanan (PDF): jadwal tugas prodiakon & daftar hantaran ---- */
+async function loadPdfLib() {
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+  return window.jspdf.jsPDF;
+}
+// Data bulan ym (bulan yang sedang dibuka memakai data di layar)
+async function reportData(ym) {
+  const month = S.months.find(m => m.id === ym);
+  if (ym === S.monthId) return { month, misa: S.misa, smk: S.smk };
+  const [misa, smk] = await Promise.all([store.list('misa', ym), store.list('smk_groups', ym)]);
+  return { month, misa, smk: smk.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0)) };
+}
+// Misa slot rutin pada akhir pekan ke-i bulan ym (dicocokkan dengan tanggal, Senin–Minggu)
+function misaOfWeek(misa, ym, slot, i) {
+  const sun = weekendsOf(ym)[i]?.sun;
+  if (!sun) return null;
+  const from = parseD(sun); from.setDate(from.getDate() - 6);
+  return misa.filter(m => m.slot === slot).find(m => m.date >= iso(from) && m.date <= sun) || null;
+}
+const monthShort = ym => { const [y, mo] = ym.split('-').map(Number); return `${MON3[mo - 1]}-${String(y).slice(2)}`; };
+function pdfFooter(doc) {
+  const n = doc.getNumberOfPages();
+  for (let i = 1; i <= n; i++) {
+    doc.setPage(i); doc.setFontSize(8); doc.setTextColor(120);
+    doc.text(`Prodiakon ${P.nama} · dicetak ${fmtShort(todayIso())}`, 10, doc.internal.pageSize.getHeight() - 6);
+    doc.text(`Hal. ${i}/${n}`, doc.internal.pageSize.getWidth() - 10, doc.internal.pageSize.getHeight() - 6, { align: 'right' });
+  }
+}
+
+// 1) Jadwal tugas prodiakon: satu tabel per jam misa, kolom per akhir pekan, koordinator biru tebal
+async function reportJadwal(ym) {
+  const jsPDF = await loadPdfLib();
+  const { misa } = await reportData(ym);
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const W = weekendsOf(ym);
+  const GREEN = [146, 208, 80], KOOR = [184, 204, 228];
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(0);
+  doc.text('JADWAL TUGAS PRODIAKON', 10, 14);
+  doc.text(monthShort(ym), doc.internal.pageSize.getWidth() - 10, 14, { align: 'right' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(`Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''}`, 10, 19);
+  let y = 23;
+  for (const k of REGULAR) {
+    const cols = W.map((_, i) => misaOfWeek(misa, ym, k, i));
+    if (!cols.some(Boolean)) continue;
+    const sl = slotByKey(k);
+    const dayName = DAYS[sl.day].toUpperCase();
+    const head = [
+      ['', ...cols.map((m, i) => m ? `TGL. ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}` : `${W[i].label} - ${dayName}`)],
+      ['', ...cols.map(m => `WARNA LITURGI : ${m ? (COLORS[m.color] || COLORS[''])[0].toUpperCase() : '-'}`)],
+      ['', ...cols.map(m => (m?.title || '-').toUpperCase())],
+      ['', ...cols.map(m => `${k} - PK. ${m?.time || sl.time}`)],
+    ];
+    const n = Math.max(1, ...cols.map(m => Math.max(m?.officers.length || 0, m?.need || 0)));
+    // urutan sesuai jadwal (seperti Excel); koordinator ditandai biru tebal di posisinya
+    const lists = cols.map(m => (m ? [...m.officers] : []));
+    const body = Array.from({ length: n }, (_, r) => [String(r + 1), ...lists.map(l => l[r] || '')]);
+    doc.autoTable({
+      startY: y, head, body, theme: 'grid', margin: { left: 10, right: 10 },
+      styles: { fontSize: 8, cellPadding: 0.9, halign: 'center', lineColor: [140, 140, 140], lineWidth: 0.1, textColor: 20 },
+      headStyles: { fillColor: GREEN, textColor: 0, fontStyle: 'bold', fontSize: 8 },
+      columnStyles: { 0: { cellWidth: 8, halign: 'right', textColor: 90 } },
+      didParseCell: d => {
+        if (d.section !== 'body' || d.column.index === 0) return;
+        const m = cols[d.column.index - 1];
+        if (m && d.cell.raw && norm(d.cell.raw) === norm(m.coordinator)) { d.cell.styles.fillColor = KOOR; d.cell.styles.fontStyle = 'bold'; }
+      },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+  }
+  // misa khusus / lainnya
+  const lain = misa.filter(m => m.slot === 'LAIN').sort(cmpMisa);
+  if (lain.length) {
+    doc.autoTable({
+      startY: y, theme: 'grid', margin: { left: 10, right: 10 },
+      head: [['TANGGAL', 'MISA', 'JAM', 'TEMPAT', 'KOORDINATOR', 'PETUGAS']],
+      body: lain.map(m => [fmtShort(m.date), m.title || '-', m.time || '', m.place || '', m.coordinator || '', m.officers.filter(o => norm(o) !== norm(m.coordinator)).join(', ')]),
+      styles: { fontSize: 8, cellPadding: 1, lineColor: [140, 140, 140], lineWidth: 0.1, textColor: 20 },
+      headStyles: { fillColor: GREEN, textColor: 0, fontStyle: 'bold' },
+      columnStyles: { 0: { cellWidth: 24 }, 1: { cellWidth: 45 }, 2: { cellWidth: 14 }, 3: { cellWidth: 28 }, 4: { cellWidth: 32 } },
+    });
+  }
+  pdfFooter(doc);
+  doc.save(`jadwal-prodiakon-${ym}.pdf`);
+}
+
+// 2) Daftar petugas prodiakon layanan hantaran: per jam layanan, kolom petugas tiap minggu + data umat
+async function reportHantaran(ym) {
+  const jsPDF = await loadPdfLib();
+  const { month, smk } = await reportData(ym);
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const weeksL = month?.weeks?.length ? month.weeks : weekendsOf(ym).map(w => w.label);
+  const ORANGE = [255, 192, 0], BLUE = [0, 176, 240];
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(0);
+  doc.text('DAFTAR PETUGAS PRODIAKON LAYANAN HANTARAN', 10, 13);
+  doc.setFontSize(10); doc.text(`BULAN  ${monthName(ym).toUpperCase()}`, 10, 18);
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(`Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''}`, doc.internal.pageSize.getWidth() - 10, 13, { align: 'right' });
+  const nW = weeksL.length, nCol = 2 + nW + 4;
+  const head = [
+    [{ content: 'NO.', rowSpan: 2 }, 'JAM', { content: 'TANGGAL', colSpan: nW }, { content: 'DAFTAR UMAT LAYANAN HANTARAN', colSpan: 4 }],
+    ['LAYANAN', ...weeksL, 'NAMA', 'LINGKUNGAN', 'ALAMAT', 'TELP / HP / WA'],
+  ];
+  const body = [];
+  for (const sl of SMK_SLOTS) {
+    const groups = smk.filter(g => g.slot === sl.key);
+    if (!groups.length) continue;
+    body.push([{ content: sl.label.toUpperCase(), colSpan: nCol, styles: { fillColor: BLUE, fontStyle: 'bold', halign: 'center', textColor: 0 } }]);
+    for (const g of groups) {
+      const ms = mem(g).length ? mem(g) : [{}];
+      const jam = REGULAR.includes(g.slot) ? `${DAYS[slotByKey(g.slot).day].toUpperCase()} ${slotByKey(g.slot).time}` : sl.label;
+      ms.forEach((m, i) => body.push([
+        i ? '' : String(g.no), i ? '' : jam, ...weeksL.map((_, j) => (i ? '' : g.officers[j] || '')),
+        m.nama || '', m.lingkungan || '', m.alamat || '', m.telp || '',
+      ]));
+    }
+  }
+  doc.autoTable({
+    startY: 22, head, body, theme: 'grid', margin: { left: 8, right: 8 },
+    styles: { fontSize: 7, cellPadding: 0.8, lineColor: [150, 150, 150], lineWidth: 0.1, textColor: 20, valign: 'middle' },
+    headStyles: { fillColor: ORANGE, textColor: 0, fontStyle: 'bold', halign: 'center' },
+    columnStyles: Object.assign({ 0: { cellWidth: 8, halign: 'center' }, 1: { cellWidth: 20, halign: 'center' } },
+      Object.fromEntries(weeksL.map((_, j) => [2 + j, { cellWidth: 21, halign: 'center' }])),
+      { [2 + nW]: { cellWidth: 42 }, [3 + nW]: { cellWidth: 20, halign: 'center' }, [5 + nW]: { cellWidth: 30 } }),
+  });
+  pdfFooter(doc);
+  doc.save(`hantaran-${ym}.pdf`);
+}
+
+function openReports() {
+  const body = `
+    <label class="fld">Bulan<select name="ym">${S.months.map(m => opt(m.id, monthName(m.id), S.monthId)).join('')}</select></label>
+    <div class="menu-list">
+      <button type="button" data-sh="rp-jadwal">📅 Jadwal tugas prodiakon (per jam misa, per minggu)</button>
+      <button type="button" data-sh="rp-hantaran">🕊️ Daftar petugas layanan hantaran (dengan alamat umat)</button>
+    </div>
+    <p class="hint">PDF A4 landscape, siap cetak atau dikirim. Laporan hantaran memuat alamat & nomor umat — bagikan hanya ke petugas.</p>`;
+  openSheet('Laporan (PDF)', body, {
+    onClick: b => {
+      const ym = $('#sheetForm').elements.ym.value;
+      if (b.dataset.sh === 'rp-jadwal') run(async () => { toast('Menyiapkan PDF…'); await reportJadwal(ym); });
+      else if (b.dataset.sh === 'rp-hantaran') run(async () => { toast('Menyiapkan PDF…'); await reportHantaran(ym); });
+    },
   });
 }
 
