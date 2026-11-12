@@ -3041,8 +3041,9 @@ async function onAuthSubmit(e) {
     if (authMode === 'signup') {
       const wa = normWa(fd.get('wa'));
       if (!wa) { err.textContent = 'No. WA tidak valid. Contoh: 081234567890'; return; }
-      const paroki = fd.get('paroki') || '';
-      if (!paroki) { err.textContent = 'Pilih paroki Anda.'; return; }
+      if (!S.parokiList.length) await fillParokiSelect(); // daftar sempat gagal dimuat → coba lagi
+      const paroki = e.target.elements.paroki.value || '';
+      if (!paroki) { err.textContent = S.parokiList.length ? 'Pilih paroki Anda.' : 'Daftar paroki gagal dimuat. Periksa internet lalu coba lagi.'; return; }
       const { data, error } = await store.sb.auth.signUp({
         email, password,
         options: { data: { nama: fd.get('nama').trim(), wa, paroki }, emailRedirectTo: parokiLink({ slug: paroki }) },
@@ -3066,19 +3067,33 @@ async function onAuthSubmit(e) {
     err.textContent = 'Gagal: ' + friendlyError(ex);
   } finally { btn.disabled = false; }
 }
+// Daftar paroki untuk halaman login/daftar. Dicoba ulang bila gagal (sinyal jelek, atau sesi
+// login lama yang kedaluwarsa: sesi itu dibuang supaya daftar terbaca sebagai tamu).
+async function loadParokiList() {
+  for (let i = 0; i < 3; i++) {
+    try { return await store.listParoki(); } catch (e) {
+      if (/jwt|401|PGRST30/i.test(`${e?.message} ${e?.code} ${e?.status}`)) await store.sb.auth.signOut({ scope: 'local' }).catch(() => {});
+      await new Promise(r => setTimeout(r, 800 * (i + 1)));
+    }
+  }
+  return [];
+}
+async function fillParokiSelect() {
+  S.parokiList = await loadParokiList();
+  const linked = S.parokiList.find(x => x.slug === (urlSlug() || lsGet('prodiakon.paroki')));
+  applyParoki(linked || { ...DEFAULT_PAROKI, nama: S.parokiList.length === 1 ? S.parokiList[0].nama : 'Gereja Katolik' });
+  const sel = $('#loginForm').elements.paroki;
+  sel.innerHTML = opt('', S.parokiList.length ? '— pilih paroki —' : '— gagal memuat, tekan Daftar untuk coba lagi —', linked?.slug || '')
+    + S.parokiList.filter(x => x.active).map(x => opt(x.slug, x.kota ? `${x.nama} – ${x.kota}` : x.nama, linked?.slug || '')).join('');
+  if (S.parokiList.length === 1 && !linked) sel.value = S.parokiList[0].slug;
+}
 async function boot() {
   store = ONLINE ? new SupaStore() : new LocalStore();
   $('#modeBadge').textContent = ONLINE ? 'Online' : 'Lokal';
   applyParoki(DEFAULT_PAROKI);
   if (!ONLINE) return showApp();
   // Halaman login/daftar: nama paroki dari link ?p=, atau pilih paroki saat daftar
-  S.parokiList = await store.listParoki().catch(() => []);
-  const linked = S.parokiList.find(x => x.slug === (urlSlug() || lsGet('prodiakon.paroki')));
-  applyParoki(linked || { ...DEFAULT_PAROKI, nama: S.parokiList.length === 1 ? S.parokiList[0].nama : 'Gereja Katolik' });
-  const sel = $('#loginForm').elements.paroki;
-  sel.innerHTML = opt('', '— pilih paroki —', linked?.slug || '')
-    + S.parokiList.filter(x => x.active).map(x => opt(x.slug, x.kota ? `${x.nama} – ${x.kota}` : x.nama, linked?.slug || '')).join('');
-  if (S.parokiList.length === 1 && !linked) sel.value = S.parokiList[0].slug;
+  await fillParokiSelect();
   $('#loginForm').addEventListener('submit', onAuthSubmit);
   $('#authToggle').addEventListener('click', () => setAuthMode(authMode === 'login' ? 'signup' : 'login'));
   $('#pendingRetry').addEventListener('click', () => run(showApp));
