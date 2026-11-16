@@ -1375,6 +1375,21 @@ function openMonthSettings() {
 }
 
 /* ---- Menu ---- */
+// Tampilan terang/gelap: disimpan per perangkat; 'auto' mengikuti setelan HP
+const THEMES = { auto: 'Otomatis (ikut HP)', light: 'Terang', dark: 'Gelap' };
+const themeNow = () => (THEMES[lsGet('prodiakon.theme')] ? lsGet('prodiakon.theme') : 'auto');
+function setTheme(t) {
+  lsSet('prodiakon.theme', t);
+  if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+}
+function openTheme() {
+  const cur = themeNow();
+  const body = `<div class="menu-list">${Object.entries(THEMES).map(([k, l]) =>
+    `<button type="button" data-sh="theme" data-k="${k}">${k === cur ? '✅' : '⚪'} ${h(l)}</button>`).join('')}</div>
+    <p class="hint">Pilihan ini hanya berlaku di perangkat ini.</p>`;
+  openSheet('Tampilan', body, { onClick: b => { setTheme(b.dataset.k); dlg.close(); toast(`Tampilan: ${THEMES[b.dataset.k]}`); } });
+}
+
 function openMenu() {
   const hasSeed = S.months.some(m => m.id === window.SEED?.months[0].id);
   const items = [
@@ -1396,6 +1411,7 @@ function openMenu() {
     S.admin && ['sponsor', `🤝 Sponsor${S.sponsor.length ? ` (${activeSponsors().length} tayang)` : ''}`],
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
     S.months.length && ['reports', '📑 Laporan (PDF)'],
+    ['theme', `🌓 Tampilan: ${THEMES[themeNow()]}`],
     ONLINE && ['profile', '👤 Profil saya'],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
@@ -1414,6 +1430,7 @@ async function menuAction(k) {
   if (k === 'go-petugas') { S.tab = 'petugas'; S.petugasView = 'master'; S.person = null; lsSet('prodiakon.tab', S.tab); render(); window.scrollTo(0, 0); return; }
   if (k === 'users') return run(openUsers);
   if (k === 'profile') return openProfile();
+  if (k === 'theme') return openTheme();
   if (k === 'reports') return openReports();
   if (k === 'paroki-settings') return openParokiForm(P);
   if (k === 'sponsor') return openSponsorList();

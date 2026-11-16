@@ -324,9 +324,24 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .fld.locked input { background: var(--soft); color: var(--muted); }
 .fld.locked::after { content: "mengikuti jadwal rutin"; font-size: .7rem; color: var(--muted); }
 .fld .invalid, .fld input.invalid, .fld select.invalid { border-color: var(--err, #dc2626); box-shadow: 0 0 0 3px rgba(220,38,38,.15); }
-/* Tema gelap sendiri (mengikuti setelan HP), supaya Chrome Android tidak menggelapkan halaman secara otomatis */
+/* Tema gelap sendiri (ikut setelan HP, atau dipilih di Menu → Tampilan), supaya Chrome Android tidak menggelapkan halaman otomatis */
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark;
+    --bg: #0f1412; --card: #1a211d; --ink: #e6ece8; --muted: #9ba8a0; --line: #2f3a34;
+    --brand: #166534; --brand-2: #1f7a44; --brand-ink: #4ade80; --brand-2-ink: #6ee7a0;
+    --accent: #352d1a; --koor: #1d3557; --koor-line: #3b5f8f; --koor-ink: #cfe2ff;
+    --warn: #fbbf24; --err: #f87171; --err-line: #7f1d1d;
+    --field: #121815; --chip: #27312c; --chip-line: #3a4740; --hover: #222b26; --hover2: #33403a;
+    --soft: #1f2723; --next: #1b2e22; --warn-bg: #3a2c12; --warn-line: #8a6420;
+    --wa-bg: #133520; --wa-line: #2f6b43; --sky: #12324a; --wil-bg: #1f2b4d; --wil-ink: #b4c3ff;
+    --ok-bg: #163a22; --ok-ink: #86efac;
+}
+:root[data-theme="dark"] .chip.empty { border-color: #8a6a1c; }
+:root[data-theme="dark"] .lit { border-color: rgba(255,255,255,.18); }
+:root[data-theme="dark"] .koor-check { border-color: #4b5a52; }
+:root[data-theme="dark"] dialog::backdrop { background: rgba(0,0,0,.6); }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0f1412; --card: #1a211d; --ink: #e6ece8; --muted: #9ba8a0; --line: #2f3a34;
     --brand: #166534; --brand-2: #1f7a44; --brand-ink: #4ade80; --brand-2-ink: #6ee7a0;
     --accent: #352d1a; --koor: #1d3557; --koor-line: #3b5f8f; --koor-ink: #cfe2ff;
@@ -336,8 +351,8 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
     --wa-bg: #133520; --wa-line: #2f6b43; --sky: #12324a; --wil-bg: #1f2b4d; --wil-ink: #b4c3ff;
     --ok-bg: #163a22; --ok-ink: #86efac;
   }
-  .chip.empty { border-color: #8a6a1c; }
-  .lit { border-color: rgba(255,255,255,.18); }
-  .koor-check { border-color: #4b5a52; }
-  dialog::backdrop { background: rgba(0,0,0,.6); }
+  :root:not([data-theme="light"]) .chip.empty { border-color: #8a6a1c; }
+  :root:not([data-theme="light"]) .lit { border-color: rgba(255,255,255,.18); }
+  :root:not([data-theme="light"]) .koor-check { border-color: #4b5a52; }
+  :root:not([data-theme="light"]) dialog::backdrop { background: rgba(0,0,0,.6); }
 }
