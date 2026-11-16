@@ -1392,6 +1392,22 @@ function setTheme(t) {
   lsSet('prodiakon.theme', t);
   if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
 }
+// Super admin: pindah ke paroki lain (membuka ulang app dengan link ?p= paroki itu)
+async function openSwitchParoki() {
+  if (!S.super) return;
+  S.parokiList = await store.listParoki();
+  const body = `<div class="list">${S.parokiList.map(p => `<div class="urow"><img class="p-thumb" src="${h(p.logo || 'icons/icon.svg')}" alt="" width="36" height="36">
+      <div class="mi"><span class="nm">${h(p.nama)}</span>${p.active ? '' : ' <span class="tag warn">Nonaktif</span>'}<div class="ad">${h(p.kota || '')}</div></div>
+      ${p.id === P.id ? '<span class="tag">Sedang dibuka</span>' : `<button type="button" class="btn small primary" data-sh="sw-open" data-id="${h(p.id)}">Buka</button>`}</div>`).join('')}</div>
+    <p class="hint">Bisa juga dengan menekan nama paroki di bagian atas layar.</p>`;
+  openSheet('Ganti paroki', body, {
+    onClick: b => {
+      const p = b.dataset.sh === 'sw-open' && S.parokiList.find(x => x.id === b.dataset.id);
+      if (p) { lsSet('prodiakon.paroki', p.slug); location.href = parokiLink(p); }
+    },
+  });
+}
+
 function openTheme() {
   const cur = themeNow();
   const body = `<div class="menu-list">${Object.entries(THEMES).map(([k, l]) =>
@@ -1419,6 +1435,7 @@ function openMenu() {
     S.admin && ['paroki-settings', '⛪ Pengaturan paroki (nama, jam misa)'],
     S.admin && ['absences', `🚫 Petugas berhalangan${upcomingAbsences().length ? ` (${upcomingAbsences().length})` : ''}`],
     S.admin && ['sponsor', `🤝 Sponsor${S.sponsor.length ? ` (${activeSponsors().length} tayang)` : ''}`],
+    ONLINE && S.super && ['switch-paroki', `🔁 Ganti paroki (sekarang: ${P.nama})`],
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
     S.months.length && ['reports', '📑 Laporan (PDF)'],
     ['theme', `🌓 Tampilan: ${THEMES[themeNow()]}`],
@@ -1441,6 +1458,7 @@ async function menuAction(k) {
   if (k === 'users') return run(openUsers);
   if (k === 'profile') return openProfile();
   if (k === 'theme') return openTheme();
+  if (k === 'switch-paroki') return run(openSwitchParoki);
   if (k === 'reports') return openReports();
   if (k === 'paroki-settings') return openParokiForm(P);
   if (k === 'sponsor') return openSponsorList();
@@ -3049,6 +3067,7 @@ async function showApp() {
     S.admin = await store.isAdmin();
     if (!S.admin && me.status !== 'approved') return showPending(me);
     $('#modeBadge').textContent = S.super ? 'Super admin' : S.admin ? 'Admin' : 'Lihat saja';
+    if (S.super) $('#app .brand').dataset.switch = '1';
     if (!S.admin && !lsGet('prodiakon.tab')) S.tab = 'saya'; // petugas: langsung jadwal sendiri
   }
   $('#login').hidden = true; $('#app').hidden = false;
@@ -3143,6 +3162,7 @@ async function boot() {
   if (data.session) return run(showApp);
   setAuthMode('login'); showLogin();
 }
+document.addEventListener('click', e => { if (S.super && e.target.closest('#app .brand')) run(openSwitchParoki); });
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
