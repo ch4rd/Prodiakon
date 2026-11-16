@@ -248,6 +248,12 @@ class SupaStore {
     if (error) throw error;
     return data;
   }
+  // Super admin: pendaftar yang menunggu di paroki lain (paroki baru belum punya admin sendiri)
+  async listPendingOther() {
+    const { data, error } = await this.sb.from('app_users').select('user_id, nama, paroki_id, created_at').eq('status', 'pending').neq('paroki_id', P.id).order('created_at');
+    if (error) throw error;
+    return data;
+  }
   async setUserStatus(id, status) {
     const { error } = await this.sb.from('app_users').update({ status }).eq('user_id', id);
     if (error) throw error;
@@ -1630,8 +1636,10 @@ async function approveToMaster(u, bound = '') {
   return p.nama;
 }
 async function openUsers() {
-  const [list, admins] = await Promise.all([store.listUsers(), store.listAdmins().catch(() => [])]);
-  S.pendingUsers = list.filter(u => u.status === 'pending').length;
+  const [list, admins, others] = await Promise.all([store.listUsers(), store.listAdmins().catch(() => []),
+    S.super ? store.listPendingOther().catch(() => []) : []]);
+  if (S.super && !S.parokiList.length) S.parokiList = await store.listParoki().catch(() => []);
+  S.pendingUsers = list.filter(u => u.status === 'pending').length + others.length;
   const row = u => {
     // Tombol di baris sendiri di bawah info; "Hapus akun" dipisah di kiri agar tidak tertekan tak sengaja
     const me = u.user_id === S.userId;
@@ -1655,12 +1663,23 @@ async function openUsers() {
     const l = list.filter(u => u.status === st);
     return l.length ? `<div class="sec-title">${title} <span class="count">${l.length}</span></div><div class="list">${l.map(row).join('')}</div>` : '';
   };
-  const body = (sec('pending', 'Menunggu persetujuan') + sec('approved', 'Disetujui') + sec('rejected', 'Ditolak / dicabut')
+  const byParoki = [...new Set(others.map(u => u.paroki_id))].map(pid => [S.parokiList.find(x => x.id === pid), others.filter(u => u.paroki_id === pid)]).filter(([pr]) => pr);
+  const otherSec = byParoki.length ? `<div class="sec-title">Menunggu di paroki lain <span class="count">${others.length}</span></div><div class="list">${byParoki.map(([pr, us]) =>
+    `<div class="urow"><div class="mi"><span class="nm">${h(pr.nama)}</span>${pr.kota ? ` <span class="ad">· ${h(pr.kota)}</span>` : ''}
+      <div class="ad">${us.map(u => h(u.nama || '(tanpa nama)')).join(', ')}</div></div>
+      <button type="button" class="btn small primary" data-sh="u-open-paroki" data-id="${h(pr.id)}">Buka paroki</button></div>`).join('')}</div>
+    <p class="hint">Setujui dari paroki masing-masing agar nama pendaftar masuk ke Master petugas paroki itu.</p>` : '';
+  const body = otherSec + (sec('pending', 'Menunggu persetujuan') + sec('approved', 'Disetujui') + sec('rejected', 'Ditolak / dicabut')
     || '<div class="empty-state">Belum ada pengguna.</div>')
     + '<p class="hint">Sebelum <b>Setujui</b>, pilih "Nama di jadwal" untuk menautkan ke petugas yang sudah ada. Bila dibiarkan kosong, nama pendaftar ditambahkan ke Master petugas.</p>'
     + '<p class="hint">Yang disetujui bisa melihat jadwal & alamat umat (tanpa bisa mengubah). Admin bisa mengubah data paroki ini dan mengangkat admin lain lewat tombol Jadikan admin.</p>';
   openSheet('Pengguna', body, {
     onClick: async b => {
+      if (b.dataset.sh === 'u-open-paroki') {
+        const pr = S.parokiList.find(x => x.id === b.dataset.id);
+        if (pr) { lsSet('prodiakon.paroki', pr.slug); location.href = parokiLink(pr); }
+        return;
+      }
       if (b.dataset.sh === 'u-delete') {
         const u = list.find(x => x.user_id === b.dataset.id), who = u.nama || u.email;
         if (!confirm(`Hapus akun ${who} (${u.email}) secara permanen?
@@ -3037,8 +3056,8 @@ async function showApp() {
   await autoNextMonth();
   refreshPush();
   if (ONLINE && S.admin) {
-    const users = await store.listUsers().catch(() => []);
-    S.pendingUsers = users.filter(u => u.status === 'pending').length;
+    const [users, others] = await Promise.all([store.listUsers().catch(() => []), S.super ? store.listPendingOther().catch(() => []) : []]);
+    S.pendingUsers = users.filter(u => u.status === 'pending').length + others.length;
     if (S.pendingUsers) toast(`${S.pendingUsers} pendaftar menunggu persetujuan (Menu ⋮ → Pengguna)`);
   }
 }
