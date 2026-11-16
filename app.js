@@ -209,8 +209,12 @@ class SupaStore {
     if (error) throw error;
     return data;
   }
+  // Paroki lama: UPDATE biasa. Upsert ikut diperiksa aturan INSERT (khusus super admin),
+  // sehingga admin paroki biasa ditolak saat mengubah nama/jam misa parokinya.
   async saveParoki(row) {
-    const { data, error } = await this.sb.from('paroki').upsert(row).select().single();
+    const { id, ...rest } = row;
+    const q = id ? this.sb.from('paroki').update(rest).eq('id', id) : this.sb.from('paroki').insert(rest);
+    const { data, error } = await q.select().single();
     if (error) throw error;
     return data;
   }
