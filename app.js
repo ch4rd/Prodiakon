@@ -1,5 +1,17 @@
 'use strict';
 
+/* ================= Kompatibilitas browser lama ================= */
+// Tablet/HP lama (Android 4.4–6) tertahan di Chrome versi lama: tambal fungsi yang belum ada.
+if (typeof structuredClone !== 'function') {
+  window.structuredClone = v => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
+}
+if (!Array.prototype.at) {
+  Object.defineProperty(Array.prototype, 'at', {
+    configurable: true, writable: true,
+    value(i) { i = Math.trunc(i) || 0; if (i < 0) i += this.length; return this[i]; },
+  });
+}
+
 /* ================= Konstanta ================= */
 const CFG = window.APP_CONFIG || {};
 const ONLINE = !!(CFG.SUPABASE_URL && CFG.SUPABASE_ANON_KEY && window.supabase);
