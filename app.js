@@ -828,8 +828,7 @@ function buildIssues() {
       const sun = weekendsOf(S.monthId)[i]?.sun || '';
       const day = sun && slotByKey(g.slot) ? slotDate(slotByKey(g.slot), sun) : sun;
       if (!name) { out.push(['⚠️', `Hantaran grup ${g.no} (${smkSlotLabel(g.slot)}) minggu ${w} belum ada petugas.`, `smk:${g.id}`, day]); return; }
-      const gw = groupWilayah(g), pw = petugasWilayah(inMaster(name));
-      if (gw.length && pw && !gw.some(w => w.id === pw.id)) out.push(['⚠️', `${name} (wilayah ${pw.nama}) mengantar hantaran grup ${g.no} di wilayah ${gw.map(w => w.nama).join(', ')} (${w}).`, `smk:${g.id}`, day]);
+      // Petugas dari wilayah lain boleh mengantar (pilihan "Ambil petugas dari wilayah lain"), jadi tidak dilaporkan.
       if (!REGULAR.includes(g.slot)) return;
       const lm = linkedMisa(g.slot, i);
       if (!lm) out.push(['⚠️', `Jadwal misa ${g.slot} minggu ke-${i + 1} (${w}) belum dibuat, padahal ada petugas Hantaran grup ${g.no}.`, `misa-new:${g.slot}|${day}`, day]);
