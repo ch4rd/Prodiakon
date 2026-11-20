@@ -1568,7 +1568,7 @@ function printView() {
       <tbody>${rows}</tbody></table>
       ${curMonth().notes ? `<p style="white-space:pre-wrap"><b>Catatan:</b>\n${h(curMonth().notes)}</p>` : ''}`;
   } else {
-    let html = `<h2>JADWAL TUGAS PRODIAKON – ${h(title.toUpperCase())}</h2>`;
+    let html = ''; // judul ditulis per halaman
     const table = list => {
       const max = Math.max(...list.map(m => Math.max(m.officers.length, m.need || 0)), 1);
       let t = `<table><thead>
@@ -1584,10 +1584,28 @@ function printView() {
       }
       return t + '</tbody></table>';
     };
-    for (const s of REGULAR) { const l = misaOfSlot(s); if (l.length) html += table(l); }
-    const lain = misaOfSlot('LAIN');
-    for (let i = 0; i < lain.length; i += 4) html += table(lain.slice(i, i + 4));
-    html += '<p>Sel biru = koordinator.</p>';
+    // Satu halaman per akhir pekan: Sabtu lalu Minggu besoknya (misa khusus di minggu itu ikut), urut tanggal & jam
+    const byWeek = new Map();
+    for (const m of [...S.misa].sort(cmpMisa)) {
+      const k = weekKey(m.date);
+      if (!byWeek.has(k)) byWeek.set(k, []);
+      byWeek.get(k).push(m);
+    }
+    const pages = [...byWeek.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([sun, list]) => {
+      const sat = parseD(sun); sat.setDate(sat.getDate() - 1);
+      const first = list[0].date, last = list[list.length - 1].date;
+      const range = first === iso(sat) && last === sun
+        ? `Sabtu, ${sat.getDate()} – Minggu, ${fmtLong(sun).split(', ')[1]}`
+        : first === last ? fmtLong(first) : `${fmtLong(first)} – ${fmtLong(last)}`;
+      let pg = `<section class="pg"><h2>JADWAL TUGAS PRODIAKON – ${h(title.toUpperCase())}</h2>
+        <h3>${h(range)}</h3>`;
+      // Misa hari biasa (mis. Kamis/Jumat) di tabel sendiri; Sabtu + Minggu tetap utuh satu tabel
+      const wkend = list.filter(m => [0, 6].includes(parseD(m.date).getDay())), other = list.filter(m => !wkend.includes(m));
+      const chunks = l => { for (let i = 0; i < l.length; i += 7) pg += table(l.slice(i, i + 7)); }; // maks 7 kolom
+      chunks(other); chunks(wkend);
+      return pg + '<p class="foot">Sel biru = koordinator.</p></section>';
+    });
+    html += pages.join('') || '<p>Belum ada jadwal misa.</p>';
     p.innerHTML = html;
   }
   setTimeout(() => window.print(), 50);
