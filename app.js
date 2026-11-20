@@ -1772,14 +1772,41 @@ async function fbMessaging() {
   if (!firebase.apps.length) firebase.initializeApp(FB);
   return firebase.messaging();
 }
+// Ringkasan perangkat untuk pesan error (mis. "Chrome 109 · Android 8.1")
+function deviceInfo() {
+  const ua = navigator.userAgent;
+  const br = (/SamsungBrowser\/([\d.]+)/.exec(ua) && `Samsung Internet ${RegExp.$1.split('.')[0]}`)
+    || (/(?:CriOS|Chrome)\/(\d+)/.exec(ua) && `Chrome ${RegExp.$1}`)
+    || (/Firefox\/(\d+)/.exec(ua) && `Firefox ${RegExp.$1}`)
+    || (/Version\/([\d.]+).*Safari/.exec(ua) && `Safari ${RegExp.$1}`) || 'browser lain';
+  const os = (/Android ([\d.]+)/.exec(ua) && `Android ${RegExp.$1}`)
+    || (/OS (\d+[_\d]*) like Mac/.exec(ua) && `iOS ${RegExp.$1.replace(/_/g, '.')}`)
+    || (/Windows NT/.test(ua) && 'Windows') || (/Mac OS X/.test(ua) && 'macOS') || '';
+  return [br, os, isStandalone() ? 'dari ikon app' : 'dari browser'].filter(Boolean).join(' · ');
+}
+// Terjemahkan error Firebase/izin ke pesan yang bisa ditindaklanjuti
+function pushErrorText(e) {
+  const code = String(e?.code || ''), msg = String(e?.message || e || '');
+  if (/permission-blocked|permission-default|denied/i.test(code + msg)) return 'Izin notifikasi ditolak. Izinkan notifikasi untuk browser ini di Pengaturan HP → Aplikasi → (Chrome/Safari) → Notifikasi, lalu coba lagi.';
+  if (/unsupported-browser/i.test(code)) return 'Browser ini tidak mendukung notifikasi. Coba buka di Chrome versi terbaru (Android) atau dari ikon app di layar utama (iPhone).';
+  if (/failed-service-worker-registration|serviceworker/i.test(code + msg)) return 'Service worker app belum siap. Tutup app sepenuhnya, buka lagi, lalu coba Aktifkan.';
+  if (/Gagal memuat https:\/\/www\.gstatic/i.test(msg)) return 'Tidak bisa memuat Firebase (koneksi internet atau pemblokir iklan). Periksa koneksi lalu coba lagi.';
+  if (/installations\/|token-subscribe-failed|token-update-failed|403|PERMISSION_DENIED|referer/i.test(code + msg)) return `Gagal mendaftar ke Firebase (${code || 'kode tidak diketahui'}). Periksa koneksi; bila tetap gagal, kirim pesan ini ke admin.`;
+  if (/register_push_token|JWT|auth/i.test(msg)) return 'Token didapat tetapi gagal disimpan ke server. Coba keluar lalu login lagi.';
+  return msg || 'Gagal mengaktifkan notifikasi.';
+}
+
 async function enablePush() {
   const st = pushState();
   if (st === 'ios-install') throw new Error('Di iPhone: buka di Safari → Share → Add to Home Screen, lalu buka app dari ikon itu dan aktifkan notifikasi.');
   if (st === 'blocked') throw new Error('Notifikasi diblokir. Izinkan lewat pengaturan situs di browser, lalu coba lagi.');
   if (st === 'unsupported') throw new Error('Perangkat/browser ini belum mendukung notifikasi.');
-  if (await Notification.requestPermission() !== 'granted') throw new Error('Izin notifikasi tidak diberikan.');
-  const reg = await navigator.serviceWorker.ready;
-  const token = await (await fbMessaging()).getToken({ vapidKey: FB.vapidKey, serviceWorkerRegistration: reg });
+  if (await Notification.requestPermission() !== 'granted') throw new Error('Izin notifikasi ditolak (permission denied).');
+  const reg = await Promise.race([navigator.serviceWorker.ready,
+    new Promise((_, no) => setTimeout(() => no(new Error('serviceworker belum aktif')), 10000))]);
+  const m = await fbMessaging();
+  if (firebase.messaging.isSupported && !(await firebase.messaging.isSupported())) throw Object.assign(new Error('unsupported'), { code: 'messaging/unsupported-browser' });
+  const token = await m.getToken({ vapidKey: FB.vapidKey, serviceWorkerRegistration: reg });
   if (!token) throw new Error('Gagal mendapatkan token notifikasi.');
   await store.registerPushToken(token);
   lsSet('prodiakon.pushToken', token);
@@ -1813,14 +1840,29 @@ function pushBlock() {
   if (!FB) return '';
   return `<div class="push-box" id="pushBox">
     <div><b>Notifikasi</b><div class="hint">${h(PUSH_TEXT[st])}</div>
-      <div class="hint">Pengingat tugas H-1 pukul 18.00${S.admin ? ', pendaftar baru' : ''}, dan persetujuan akun.</div></div>
+      <div class="hint">Pengingat tugas H-1 pukul 18.00${S.admin ? ', pendaftar baru' : ''}, dan persetujuan akun.</div>
+      ${(() => {
+        let e = null; try { e = JSON.parse(lsGet('prodiakon.pushErr') || 'null'); } catch { /* abaikan */ }
+        return e && st !== 'on' ? `<div class="push-err"><b>Terakhir gagal:</b> ${h(e.text)}
+          <div class="hint">${h(e.device)} · ${h(e.code || e.raw)} · ${h(new Date(e.at).toLocaleString('id-ID'))}</div></div>` : '';
+      })()}
+      ${st === 'unsupported' ? `<div class="hint">Perangkat: ${h(deviceInfo())}</div>` : ''}</div>
     ${st === 'on' ? '<button type="button" class="btn small" data-sh="push-off" data-act="push-off">Matikan</button>'
       : st === 'off' ? '<button type="button" class="btn small primary" data-sh="push-on" data-act="push-on">Aktifkan</button>' : ''}
   </div>`;
 }
 async function togglePush(on) {
-  const ok = await run(async () => { await (on ? enablePush() : disablePush()); });
-  if (ok === false) return;
+  try {
+    await (on ? enablePush() : disablePush());
+    lsSet('prodiakon.pushErr', '');
+  } catch (e) {
+    console.error('push', e);
+    const text = pushErrorText(e);
+    lsSet('prodiakon.pushErr', JSON.stringify({ text, code: String(e?.code || ''), raw: String(e?.message || e).slice(0, 200), device: deviceInfo(), at: new Date().toISOString() }));
+    toast('Gagal: ' + text);
+    const box = $('#pushBox'); if (box) box.outerHTML = pushBlock();
+    return;
+  }
   toast(on ? 'Notifikasi aktif' : 'Notifikasi dimatikan');
   const box = $('#pushBox'); if (box) box.outerHTML = pushBlock();
   if (S.tab === 'saya' && !dlg.open) render();

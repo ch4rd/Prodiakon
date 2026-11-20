@@ -358,3 +358,5 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
   :root:not([data-theme="light"]) .koor-check { border-color: #4b5a52; }
   :root:not([data-theme="light"]) dialog::backdrop { background: rgba(0,0,0,.6); }
 }
+.push-err { margin-top: 6px; padding: 6px 8px; border-radius: 6px; background: #fff1f1; border: 1px solid #fecaca; font-size: .82rem; color: var(--err); }
+.push-err .hint { color: var(--muted); overflow-wrap: anywhere; }
