@@ -1611,36 +1611,38 @@ function printView(misaList = S.misa, subtitle = '') {
   setTimeout(() => window.print(), 50);
 }
 
-/* ---- Pilih cakupan cetak jadwal misa: 1 bulan / pilih minggu / rentang tanggal (maks. 1 bulan) ---- */
+/* ---- Pilih cakupan cetak jadwal misa: 1 bulan / pilih Sabtu–Minggu (weekend) / rentang tanggal (maks. 1 bulan) ---- */
 function openPrintMisa() {
   if (!S.misa.length) { toast('Belum ada jadwal misa bulan ini'); return; }
+  // Pilihan weekend: hanya misa Sabtu & Minggu, dikelompokkan per akhir pekan (kunci = tanggal Minggu)
+  const isWeekend = m => [0, 6].includes(parseD(m.date).getDay());
   const byWeek = new Map();
-  for (const m of [...S.misa].sort(cmpMisa)) {
+  for (const m of [...S.misa].filter(isWeekend).sort(cmpMisa)) {
     const k = weekKey(m.date);
     if (!byWeek.has(k)) byWeek.set(k, []);
     byWeek.get(k).push(m);
   }
   const weeksList = [...byWeek.keys()].sort();
   const thisWk = weekKey(todayIso());
-  // Default: minggu ini & minggu depan (bila ada di bulan ini), selain itu minggu pertama bulan ini
+  // Default: weekend ini & weekend depan (bila ada di bulan ini), selain itu weekend pertama bulan ini
   const upcoming = weeksList.filter(k => k >= thisWk);
   const preset = new Set(upcoming.length ? upcoming.slice(0, 2) : weeksList.slice(0, 1));
   const label = k => {
     const l = byWeek.get(k), sun = parseD(k), sat = parseD(k); sat.setDate(sat.getDate() - 1);
-    const f = l[0].date, t = l[l.length - 1].date;
-    const txt = f === iso(sat) && t === k ? `Sabtu ${sat.getDate()} – Minggu ${sun.getDate()} ${MON3[sun.getMonth()]}`
-      : f === t ? fmtShort(f) : `${fmtShort(f)} – ${fmtShort(t)}`;
-    return `${txt} · ${l.length} misa${k === thisWk ? ' · minggu ini' : k < thisWk ? ' · sudah lewat' : ''}`;
+    const sameMonth = sat.getMonth() === sun.getMonth();
+    const txt = `Sabtu ${sat.getDate()}${sameMonth ? '' : ' ' + MON3[sat.getMonth()]} – Minggu ${sun.getDate()} ${MON3[sun.getMonth()]}`;
+    return `${txt} · ${l.length} misa${k === thisWk ? ' · weekend ini' : k < thisWk ? ' · sudah lewat' : ''}`;
   };
   const dates = S.misa.map(m => m.date).sort(), d0 = dates[0], d1 = dates[dates.length - 1];
   const body = `
     <div class="seg" id="prMode">
       <label><input type="radio" name="mode" value="month"> Satu bulan</label>
-      <label><input type="radio" name="mode" value="weeks" checked> Pilih minggu</label>
+      <label><input type="radio" name="mode" value="weeks" checked> Pilih Sabtu–Minggu (weekend)</label>
       <label><input type="radio" name="mode" value="range"> Rentang tanggal</label>
     </div>
     <div id="prWeeks" class="pr-weeks">
-      ${weeksList.map(k => `<label class="pr-week${k < thisWk ? ' past' : ''}"><input type="checkbox" value="${k}" ${preset.has(k) ? 'checked' : ''}> ${h(label(k))}</label>`).join('')}
+      ${weeksList.map(k => `<label class="pr-week${k < thisWk ? ' past' : ''}"><input type="checkbox" value="${k}" ${preset.has(k) ? 'checked' : ''}> ${h(label(k))}</label>`).join('') || '<div class="hint">Belum ada misa Sabtu/Minggu bulan ini.</div>'}
+      <div class="hint">Hanya misa Sabtu & Minggu. Misa khusus hari biasa ikut bila memilih "Satu bulan" atau "Rentang tanggal".</div>
     </div>
     <div id="prRange" class="grid2" hidden>
       <label class="fld">Dari tanggal<input type="date" name="from" value="${h(d0)}" min="${h(d0)}" max="${h(d1)}"></label>
@@ -1654,7 +1656,7 @@ function openPrintMisa() {
     if (mode === 'month') return { list: S.misa, sub: '' };
     if (mode === 'weeks') {
       const ks = $$('#prWeeks input:checked', f).map(x => x.value);
-      return { list: S.misa.filter(m => ks.includes(weekKey(m.date))), sub: ks.length ? `${monthName(S.monthId)} · ${ks.length} minggu` : '' };
+      return { list: S.misa.filter(m => isWeekend(m) && ks.includes(weekKey(m.date))), sub: ks.length ? `${monthName(S.monthId)} · ${ks.length} weekend` : '' };
     }
     // rentang dibatasi ke bulan ini (maks. 1 bulan)
     const clamp = v => (v < d0 ? d0 : v > d1 ? d1 : v);
