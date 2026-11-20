@@ -367,3 +367,12 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
   .print-only h3 { font-size: 11pt; margin: 0 0 8px; }
   .print-only .foot { font-size: 8pt; color: #444; }
 }
+/* Pilihan cetak jadwal misa */
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg label { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: .9rem; cursor: pointer; }
+.seg label:has(input:checked) { border-color: var(--brand); background: var(--brand); color: #fff; }
+.seg input { margin: 0; }
+.pr-weeks { display: flex; flex-direction: column; gap: 6px; }
+.pr-week { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: .92rem; cursor: pointer; }
+.pr-week input { width: 18px; height: 18px; flex: none; }
+.pr-week.past { color: var(--muted); }
