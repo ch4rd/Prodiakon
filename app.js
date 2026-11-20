@@ -837,6 +837,14 @@ function buildIssues() {
       }
     });
   }
+  // Kuota misa lebih kecil dari jumlah grup hantaran di jam itu → petugas hantaran tidak muat di misa
+  for (const m of S.misa) {
+    if (!m.need || !REGULAR.includes(m.slot)) continue;
+    const i = weekendsOf(S.monthId).findIndex((_, j) => linkedMisa(m.slot, j)?.id === m.id);
+    if (i < 0) continue;
+    const grup = S.smk.filter(g => g.slot === m.slot && mem(g).length).length;
+    if (grup > m.need) out.push(['⚠️', `Kuota misa ${m.slot} ${fmtShort(m.date)} (${m.need}) lebih kecil dari jumlah grup hantaran jam itu (${grup}). Petugas hantaran harus ikut misa ini, jadi naikkan kuota menjadi minimal ${grup}.`, `misa:${m.id}`, m.date]);
+  }
   // Petugas yang dijadwalkan di slot yang rutin tidak bisa ia ikuti
   for (const m of S.misa) for (const n of m.officers) {
     if (slotBlocked(n, m.slot)) out.push(['❗', `${n} ${blockedLabel(m.slot)}, tapi dijadwalkan di misa ${m.slot} ${fmtShort(m.date)}.`, `misa:${m.id}`, m.date]);
@@ -1023,7 +1031,8 @@ function openMisa(m) {
       if (b.dataset.sh === 'rm-off') { officers.splice(Number(b.dataset.i), 1); renderOfficers(); }
       else if (b.dataset.sh === 'rand-off') {
         const f = $('#sheetForm'), need = Number(f.elements.need.value) || 0;
-        const n = Math.max(1, need - officers.length);
+        if (need && officers.length >= need) { toast(`Petugas sudah penuh (${officers.length}/${need}). Naikkan "Jumlah petugas dibutuhkan" bila perlu tambahan.`); return; }
+        const n = need ? need - officers.length : 1; // kuota 0 = bebas → tambah satu per klik
         const picks = randomPetugas(n, { date: f.elements.date.value, slot: f.elements.slot.value, exclude: officers, misaId: m.id });
         if (!picks.length) { toast('Tidak ada petugas lain yang tersedia di akhir pekan ini'); return; }
         officers.push(...picks); renderOfficers();
@@ -1227,7 +1236,8 @@ function openSmk(g) {
       // Petugas hantaran = petugas misa di hari & jam yang sama → otomatis masuk jadwal misa
       const r = await addHantaranToMisa(row);
       render();
-      toast(['Tersimpan', r.added && `${r.added} petugas hantaran ditambahkan ke jadwal misa`, r.noMisa && `${r.noMisa} minggu belum ada jadwal misanya`].filter(Boolean).join(' · '));
+      toast(['Tersimpan', r.added && `${r.added} petugas hantaran ditambahkan ke jadwal misa`, r.noMisa && `${r.noMisa} minggu belum ada jadwal misanya`,
+        r.full.length && `misa penuh, tidak ditambahkan: ${r.full.join(', ')}`].filter(Boolean).join(' · '));
     },
     del: isNew ? null : async () => {
       await store.remove('smk_groups', g.id);
@@ -2160,21 +2170,24 @@ function hantaranOpts(cur, wil, date, slot = '', otherWil = false) {
 }
 // Petugas hantaran tiap minggu → ditambahkan ke misa rutin pada hari & jam yang sama
 async function addHantaranToMisa(g) {
-  if (!REGULAR.includes(g.slot)) return { added: 0, noMisa: 0 };
+  if (!REGULAR.includes(g.slot)) return { added: 0, noMisa: 0, full: [] };
   let added = 0, noMisa = 0;
-  const changed = new Map();
+  const changed = new Map(), full = [];
   g.officers.forEach((n, i) => {
     if (!n || n === '-') return;
     const lm = linkedMisa(g.slot, i);
     if (!lm) { noMisa++; return; }
     const m = changed.get(lm.id) || { ...lm, officers: [...lm.officers] };
-    if (!m.officers.some(x => norm(x) === norm(n))) { m.officers.push(n); added++; changed.set(m.id, m); }
+    if (m.officers.some(x => norm(x) === norm(n))) return;
+    // Kuota misa dihormati: bila sudah penuh, petugas tidak ditambahkan (tab Cek tetap menandainya)
+    if (m.need && m.officers.length >= m.need) { full.push(`${n} (${m.slot} ${fmtShort(m.date)} sudah ${m.officers.length}/${m.need})`); return; }
+    m.officers.push(n); added++; changed.set(m.id, m);
   });
   if (changed.size) {
     await store.upsert('misa', [...changed.values()]);
     S.misa = S.misa.map(m => changed.get(m.id) || m);
   }
-  return { added, noMisa };
+  return { added, noMisa, full };
 }
 // Isi wilayah petugas yang kosong dari grup hantaran yang paling sering dilayani (bulan aktif); seri → dibiarkan
 async function autoPetugasWilayah() {
@@ -2674,7 +2687,7 @@ function emptyHantaran() {
 // Urutan: yang sudah bertugas di misa jam itu dulu, lalu yang paling sedikit hantarannya bulan ini, acak.
 function planHantaranFill() {
   const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-  const hBusy = new Map(), mBusy = new Map(), hCount = new Map();
+  const hBusy = new Map(), mBusy = new Map(), hCount = new Map(), mExtra = new Map(); // mExtra: tambahan rencana per misa
   const add = (map, wk, n, v) => { if (!map.has(wk)) map.set(wk, new Map()); map.get(wk).set(norm(n), v); };
   for (const m of S.misa) for (const n of m.officers) add(mBusy, weekKey(m.date), n, m.id);
   for (const g of S.smk) g.officers.forEach((n, i) => {
@@ -2687,16 +2700,25 @@ function planHantaranFill() {
     if (!ids.size) { plan.push({ g, i, day, pick: '', why: 'umat grup ini belum punya wilayah' }); continue; }
     const wk = weekKey(day), lm = linkedMisa(g.slot, i);
     const inMisa = n => !!lm && lm.officers.some(o => norm(o) === norm(n));
+    // Misa jam itu sudah penuh → hanya boleh memilih yang sudah ada di misa itu (tidak menambah petugas misa)
+    const misaFull = !!lm && !!lm.need && lm.officers.length + (mExtra.get(lm.id) || 0) >= lm.need;
     const cands = shuffle(S.petugas.filter(p => {
       if (!p.active || !ids.has(p.wilayah_id) || unavailable(p.nama, day, g.slot)) return false;
+      if (misaFull && !inMisa(p.nama)) return false;
       if (hBusy.get(wk)?.has(norm(p.nama))) return false;                  // sudah mengantar hantaran lain minggu itu
       const misaId = mBusy.get(wk)?.get(norm(p.nama));
       return !misaId || misaId === lm?.id;                                  // bertugas misa lain minggu itu → tidak
     })).sort((a, b) => (inMisa(b.nama) - inMisa(a.nama)) || ((hCount.get(norm(a.nama)) || 0) - (hCount.get(norm(b.nama)) || 0)));
     const p = cands[0];
-    if (!p) { plan.push({ g, i, day, pick: '', why: `tidak ada petugas wilayah ${wil.map(w => w.nama).join(', ')} yang tersedia` }); continue; }
+    if (!p) {
+      const why = misaFull
+        ? `misa ${lm.slot} ${fmtShort(lm.date)} sudah penuh (${lm.officers.length + (mExtra.get(lm.id) || 0)}/${lm.need}) dan tidak ada petugasnya dari wilayah ${wil.map(w => w.nama).join(', ')}`
+        : `tidak ada petugas wilayah ${wil.map(w => w.nama).join(', ')} yang tersedia`;
+      plan.push({ g, i, day, pick: '', why }); continue;
+    }
     add(hBusy, wk, p.nama, true); hCount.set(norm(p.nama), (hCount.get(norm(p.nama)) || 0) + 1);
     if (lm) add(mBusy, wk, p.nama, lm.id);
+    if (lm && !inMisa(p.nama)) mExtra.set(lm.id, (mExtra.get(lm.id) || 0) + 1);
     plan.push({ g, i, day, pick: p.nama, inMisa: inMisa(p.nama) });
   }
   return plan;
