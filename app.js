@@ -912,7 +912,7 @@ function goIssue(link) {
   if (type === 'umat') return openUmat(UM.get(v));
   if (type === 'ling') return openLingkunganForm(S.lingkungan.find(l => l.id === v));
   if (type === 'petugas-new') { openPetugasForm(); $('#sheetForm').elements.nama.value = v; return; }
-  if (type === 'person') { S.tab = 'petugas'; S.petugasView = 'tugas'; S.person = v; lsSet('prodiakon.tab', S.tab); render(); window.scrollTo(0, 0); return; }
+  if (type === 'person') { S.tab = 'petugas'; S.petugasView = 'tugas'; S.person = v; lsSet('prodiakon.tab', S.tab); render(); $('#main').scrollTo(0, 0); return; }
   if (type === 'misa-new') {
     const [slot, date] = v.split('|');
     openMisa();
@@ -1486,8 +1486,8 @@ function openMenu() {
 
 async function menuAction(k) {
   if (!S.admin && ['new-month', 'settings', 'import', 'load-seed', 'users', 'paroki-settings', 'sponsor', 'absences'].includes(k)) return;
-  if (k === 'go-wilayah' || k === 'go-umat') { S.tab = 'smk'; S.smkView = k === 'go-wilayah' ? 'wilayah' : 'umat'; S.person = null; lsSet('prodiakon.tab', S.tab); lsSet('prodiakon.smkView', S.smkView); render(); window.scrollTo(0, 0); return; }
-  if (k === 'go-petugas') { S.tab = 'petugas'; S.petugasView = 'master'; S.person = null; lsSet('prodiakon.tab', S.tab); render(); window.scrollTo(0, 0); return; }
+  if (k === 'go-wilayah' || k === 'go-umat') { S.tab = 'smk'; S.smkView = k === 'go-wilayah' ? 'wilayah' : 'umat'; S.person = null; lsSet('prodiakon.tab', S.tab); lsSet('prodiakon.smkView', S.smkView); render(); $('#main').scrollTo(0, 0); return; }
+  if (k === 'go-petugas') { S.tab = 'petugas'; S.petugasView = 'master'; S.person = null; lsSet('prodiakon.tab', S.tab); render(); $('#main').scrollTo(0, 0); return; }
   if (k === 'users') return run(openUsers);
   if (k === 'profile') return openProfile();
   if (k === 'theme') return openTheme();
@@ -1725,7 +1725,7 @@ $('#main').addEventListener('click', e => {
   if (act === 'share-misa') { const m = S.misa.find(x => x.id === id); if (m) run(() => openMisaPoster(m)); return; }
   if (act === 'auto-fill') { if (S.admin) openAutoFill(); return; }
   if (act === 'auto-hantaran') { if (S.admin) openHantaranFill(); return; }
-  if (act === 'koor') { const m = S.misa.find(x => x.id === id); if (m && canCoordinate(m)) { S.prevTab = S.tab; S.tab = 'koor'; S.koorMisa = id; S.koorDraft = null; render(); window.scrollTo(0, 0); } return; }
+  if (act === 'koor') { const m = S.misa.find(x => x.id === id); if (m && canCoordinate(m)) { S.prevTab = S.tab; S.tab = 'koor'; S.koorMisa = id; S.koorDraft = null; render(); $('#main').scrollTo(0, 0); } return; }
   if (act === 'koor-back') { S.tab = S.prevTab && S.prevTab !== 'koor' ? S.prevTab : 'saya'; S.koorMisa = null; render(); return; }
   if (act === 'koor-toggle') { S.koorDraft.set(k, !S.koorDraft.get(k)); renderKoor($('#main')); return; }
   if (act === 'koor-all') { for (const n of S.koorDraft.keys()) S.koorDraft.set(n, true); renderKoor($('#main')); return; }
@@ -1734,7 +1734,7 @@ $('#main').addEventListener('click', e => {
   if (act === 'misa-filter') { S.misaFilter = k; render(); }
   else if (act === 'edit-misa') openMisa(S.misa.find(m => m.id === id));
   else if (act === 'edit-smk') openSmk(S.smk.find(g => g.id === id));
-  else if (act === 'person') { S.person = k; render(); window.scrollTo(0, 0); }
+  else if (act === 'person') { S.person = k; render(); $('#main').scrollTo(0, 0); }
   else if (act === 'back') { S.person = null; render(); }
   else if (act === 'load-seed') run(loadSeed);
   else if (act === 'new-month') openNewMonth();
@@ -1748,7 +1748,7 @@ $('#main').addEventListener('click', e => {
 });
 $$('.tabs button').forEach(b => b.addEventListener('click', () => {
   S.tab = b.dataset.tab; S.person = null; lsSet('prodiakon.tab', S.tab);
-  render(); window.scrollTo(0, 0);
+  render(); $('#main').scrollTo(0, 0);
 }));
 $('#monthSel').addEventListener('change', e => { S.monthId = e.target.value; S.person = null; run(loadMonth); });
 $('#menuBtn').addEventListener('click', openMenu);
