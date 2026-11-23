@@ -627,7 +627,7 @@ function renderMasterPetugas(main, bar, all) {
       const a = all.find(x => x.key === norm(p.nama));
       const mi = a ? a.items.filter(i => i.type === 'misa').length : 0, sm = a ? a.items.filter(i => i.type === 'smk').length : 0;
       return `<div class="umat${S.admin ? ' tap' : ''}" ${S.admin ? `data-act="edit-petugas" data-id="${h(p.id)}"` : ''}>
-        <div><span class="nm">${h(p.nama)}</span>${(p.blocked_slots || []).filter(k => REGULAR.includes(k)).map(k => ` <span class="tag warn" title="${h(blockedLabel(k))}">Tidak bisa ${h(k)}</span>`).join('')}${petugasWilayah(p) ? ` <span class="tag wil">${h(petugasWilayah(p).nama)}</span>` : (S.wilayah.length && p.active ? ' <span class="tag warn">wilayah?</span>' : '')}${(() => { const a = nextAbsence(p.id); if (!a) return ''; const per = a.start_date <= todayIso() ? `s/d ${fmtShort(a.end_date)}` : `${fmtShort(a.start_date)} – ${fmtShort(a.end_date)}`; return ` <span class="tag warn" title="${h(a.reason)}">🚫 Berhalangan ${h(per)}</span>`; })()}</div>
+        <div><span class="nm">${h(p.nama)}</span>${(p.blocked_slots || []).filter(k => REGULAR.includes(k)).map(k => ` <span class="tag warn" title="${h(blockedLabel(k))}">Tidak bisa ${h(k)}</span>`).join('')}${p.no_hantaran ? ' <span class="tag warn">Tanpa hantaran</span>' : ''}${petugasWilayah(p) ? ` <span class="tag wil">${h(petugasWilayah(p).nama)}</span>` : (S.wilayah.length && p.active ? ' <span class="tag warn">wilayah?</span>' : '')}${(() => { const a = nextAbsence(p.id); if (!a) return ''; const per = a.start_date <= todayIso() ? `s/d ${fmtShort(a.end_date)}` : `${fmtShort(a.start_date)} – ${fmtShort(a.end_date)}`; return ` <span class="tag warn" title="${h(a.reason)}">🚫 Berhalangan ${h(per)}</span>`; })()}</div>
         ${p.telp ? `<div class="phones">${phoneLinks(p.telp)}</div>` : ''}
         ${p.note ? `<div class="ad">📝 ${h(p.note)}</div>` : ''}
         <div class="tags">${mi || sm ? `${mi ? `<span class="tag">${mi} misa</span>` : ''}${sm ? `<span class="tag">${sm} hantaran</span>` : ''}`
@@ -654,6 +654,7 @@ function openPetugasForm(p) {
     <label class="fld">Telp / HP<input name="telp" value="${h(p.telp)}" inputmode="tel"></label>
     ${REGULAR.length ? `<div class="fld">Tidak bisa bertugas rutin di (misa & hantaran)</div>
       <div class="chips">${MISA_SLOTS.filter(x => x.key !== 'LAIN').map(x => `<label class="chip check"><input type="checkbox" name="blk_${h(x.key)}" ${(p.blocked_slots || []).includes(x.key) ? 'checked' : ''}> ${h(x.key)} · ${h(x.label)}</label>`).join('')}</div>` : ''}
+    <label><input type="checkbox" name="no_hantaran" ${p.no_hantaran ? 'checked' : ''}> Tidak ikut hantaran (tidak dipilih saat isi otomatis hantaran)</label>
     <label class="fld">Wilayah (petugas hantaran hanya melayani umat di wilayah ini)<select name="wilayah_id">${opt('', '— belum diatur —', p.wilayah_id || '')}${sortedWilayah().map(w => opt(w.id, w.nama, p.wilayah_id)).join('')}</select></label>
     <label class="fld">Catatan<input name="note" value="${h(p.note)}"></label>
     <label><input type="checkbox" name="active" ${p.active ? 'checked' : ''}> Aktif (bisa dipilih di jadwal)</label>
@@ -669,7 +670,7 @@ function openPetugasForm(p) {
       else if (b.dataset.sh === 'ab-edit') { dlg.close(); openAbsenceForm(S.absences.find(a => a.id === b.dataset.id)); }
     },
     save: async fd => {
-      const row = { ...p, nama: fd.get('nama').trim().replace(/\s+/g, ' '), telp: fd.get('telp').trim(), note: fd.get('note').trim(), active: !!fd.get('active'), wilayah_id: fd.get('wilayah_id') || null,
+      const row = { ...p, nama: fd.get('nama').trim().replace(/\s+/g, ' '), telp: fd.get('telp').trim(), note: fd.get('note').trim(), active: !!fd.get('active'), wilayah_id: fd.get('wilayah_id') || null, no_hantaran: !!fd.get('no_hantaran'),
         blocked_slots: [...REGULAR.filter(k => fd.get('blk_' + k)), ...(p.blocked_slots || []).filter(k => !REGULAR.includes(k))] };
       if (!row.nama) { toast('Nama wajib diisi'); return false; }
       if (S.petugas.some(x => x.id !== row.id && norm(x.nama) === norm(row.nama))) { toast(`"${row.nama}" sudah ada di master`); return false; }
@@ -2257,7 +2258,7 @@ function hantaranOpts(cur, wil, date, slot = '', otherWil = false) {
   const one = p => {
     const off = unavailable(p.nama, date, slot), sel = norm(p.nama) === norm(cur);
     const pw = petugasWilayah(p), outside = ids.size && !ids.has(p.wilayah_id);
-    const why = off || (outside ? (pw ? `wilayah ${pw.nama}` : 'wilayah belum diatur') : '');
+    const why = off || (p.no_hantaran ? 'tidak ikut hantaran' : '') || (outside ? (pw ? `wilayah ${pw.nama}` : 'wilayah belum diatur') : '');
     return `<option value="${h(p.nama)}" ${sel ? 'selected' : ''}>${off ? '🚫 ' : ''}${h(p.nama)}${why ? ` (${h(why)})` : ''}</option>`;
   };
   const grp = (label, list) => (list.length ? `<optgroup label="${h(label)}">${list.map(one).join('')}</optgroup>` : '');
@@ -2807,7 +2808,7 @@ function planHantaranFill() {
     // Misa jam itu sudah penuh → hanya boleh memilih yang sudah ada di misa itu (tidak menambah petugas misa)
     const misaFull = !!lm && !!lm.need && lm.officers.length + (mExtra.get(lm.id) || 0) >= lm.need;
     const cands = shuffle(S.petugas.filter(p => {
-      if (!p.active || !ids.has(p.wilayah_id) || unavailable(p.nama, day, g.slot)) return false;
+      if (!p.active || p.no_hantaran || !ids.has(p.wilayah_id) || unavailable(p.nama, day, g.slot)) return false;
       if (misaFull && !inMisa(p.nama)) return false;
       if (hBusy.get(wk)?.has(norm(p.nama))) return false;                  // sudah mengantar hantaran lain minggu itu
       const misaId = mBusy.get(wk)?.get(norm(p.nama));
