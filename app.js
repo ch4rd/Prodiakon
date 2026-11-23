@@ -943,7 +943,7 @@ function renderCek(main) {
 
 /* ================= Sheet (dialog) ================= */
 const dlg = $('#sheet');
-function openSheet(title, body, { save, del, saveLabel = 'Simpan', onClick } = {}) {
+function openSheet(title, body, { save, del, saveLabel = 'Simpan', busyLabel = 'Menyimpan…', onClick } = {}) {
   const f = $('#sheetForm');
   f.innerHTML = `<div class="sh-head"><span>${h(title)}</span><button type="button" class="icon-btn" data-sh="close">✕</button></div>
     <div class="sh-body">${body}</div>
@@ -966,8 +966,18 @@ function openSheet(title, body, { save, del, saveLabel = 'Simpan', onClick } = {
       bad.addEventListener('input', () => bad.classList.remove('invalid'), { once: true });
       return;
     }
-    const ok = await run(() => save(new FormData(f), f));
-    if (ok !== false) dlg.close();
+    // Kunci tombol selama menyimpan: ketukan berulang (sinyal lambat) tidak boleh menyimpan berkali-kali
+    if (f.dataset.busy) return;
+    f.dataset.busy = '1';
+    const sub = f.querySelector('button[type="submit"]');
+    if (sub) { sub.disabled = true; sub.dataset.label = sub.textContent; sub.textContent = '⏳ ' + busyLabel; }
+    try {
+      const ok = await run(() => save(new FormData(f), f));
+      if (ok !== false) dlg.close();
+    } finally {
+      delete f.dataset.busy;
+      if (sub) { sub.disabled = false; sub.textContent = sub.dataset.label; }
+    }
   };
   f.onclick = async e => {
     const b = e.target.closest('[data-sh]');
@@ -1371,11 +1381,13 @@ function openNewMonth() {
     <label><input type="checkbox" name="gen" checked> Buat misa rutin tiap akhir pekan</label>
     <p class="hint">${h(slotTx)}. Jam & jumlah petugas diatur di Menu ⋮ → Pengaturan paroki.</p>`;
   openSheet('Bulan baru', body, {
-    saveLabel: 'Buat',
+    saveLabel: 'Buat', busyLabel: 'Membuat jadwal…',
     save: async fd => {
       const ym = fd.get('ym');
       if (S.months.some(m => m.id === ym)) { toast('Bulan itu sudah ada'); return false; }
-      await createMonth(ym, { gen: !!fd.get('gen'), copyFrom: fd.get('copy') ? S.monthId : null, notesFrom: curMonth()?.notes || '' });
+      // insertOnly: database menolak bila bulan itu sudah dibuat (mis. di HP lain), sebelum misa ikut dibuat
+      await createMonth(ym, { gen: !!fd.get('gen'), copyFrom: fd.get('copy') ? S.monthId : null, notesFrom: curMonth()?.notes || '', insertOnly: true })
+        .catch(e => { throw /duplicate|23505|already exists/i.test(String(e?.message || e?.code || e)) ? new Error(`${monthName(ym)} sudah dibuat sebelumnya — muat ulang app`) : e; });
       S.monthId = ym; lsSet('prodiakon.month', ym);
       await loadMonths(); toast(`${monthName(ym)} dibuat`);
     },
