@@ -2815,6 +2815,8 @@ function planHantaranFill() {
     const d = smkDay(g.slot, i);
     if (n && d) { add(hBusy, weekKey(d), n, true); hCount.set(norm(n), (hCount.get(norm(n)) || 0) + 1); }
   });
+  // Satu petugas paling banyak sekali per grup dalam sebulan (yang sudah terisi + rencana baru)
+  const inGroup = new Map(S.smk.map(g => [g.id, new Set(g.officers.filter(Boolean).map(norm))]));
   const plan = [];
   for (const { g, i, day } of emptyHantaran().sort((a, b) => a.day.localeCompare(b.day) || String(a.g.no).localeCompare(String(b.g.no), 'id', { numeric: true }))) {
     const wil = groupWilayah(g), ids = new Set(wil.map(w => w.id));
@@ -2825,6 +2827,7 @@ function planHantaranFill() {
     const misaFull = !!lm && !!lm.need && lm.officers.length + (mExtra.get(lm.id) || 0) >= lm.need;
     const cands = shuffle(S.petugas.filter(p => {
       if (!p.active || p.no_hantaran || !ids.has(p.wilayah_id) || unavailable(p.nama, day, g.slot)) return false;
+      if (inGroup.get(g.id)?.has(norm(p.nama))) return false;               // sudah bertugas di grup ini bulan ini
       if (misaFull && !inMisa(p.nama)) return false;
       if (hBusy.get(wk)?.has(norm(p.nama))) return false;                  // sudah mengantar hantaran lain minggu itu
       const misaId = mBusy.get(wk)?.get(norm(p.nama));
@@ -2834,10 +2837,11 @@ function planHantaranFill() {
     if (!p) {
       const why = misaFull
         ? `misa ${lm.slot} ${fmtShort(lm.date)} sudah penuh (${lm.officers.length + (mExtra.get(lm.id) || 0)}/${lm.need}) dan tidak ada petugasnya dari wilayah ${wil.map(w => w.nama).join(', ')}`
-        : `tidak ada petugas wilayah ${wil.map(w => w.nama).join(', ')} yang tersedia`;
+        : `tidak ada petugas wilayah ${wil.map(w => w.nama).join(', ')} yang tersedia (dan belum bertugas di grup ini bulan ini)`;
       plan.push({ g, i, day, pick: '', why }); continue;
     }
     add(hBusy, wk, p.nama, true); hCount.set(norm(p.nama), (hCount.get(norm(p.nama)) || 0) + 1);
+    inGroup.get(g.id)?.add(norm(p.nama));
     if (lm) add(mBusy, wk, p.nama, lm.id);
     if (lm && !inMisa(p.nama)) mExtra.set(lm.id, (mExtra.get(lm.id) || 0) + 1);
     plan.push({ g, i, day, pick: p.nama, inMisa: inMisa(p.nama) });
