@@ -1473,6 +1473,7 @@ function openMenu() {
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
     S.months.length && ['reports', '📑 Laporan (PDF)'],
     ['theme', `🌓 Tampilan: ${THEMES[themeNow()]}`],
+    ['guide', '📖 Panduan aplikasi'],
     ONLINE && ['profile', '👤 Profil saya'],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
@@ -1492,6 +1493,7 @@ async function menuAction(k) {
   if (k === 'users') return run(openUsers);
   if (k === 'profile') return openProfile();
   if (k === 'theme') return openTheme();
+  if (k === 'guide') return window.open('panduan.html', '_blank', 'noopener');
   if (k === 'switch-paroki') return run(openSwitchParoki);
   if (k === 'reports') return openReports();
   if (k === 'paroki-settings') return openParokiForm(P);
