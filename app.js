@@ -2494,103 +2494,112 @@ function pdfFooter(doc) {
   }
 }
 
-// 1) Jadwal tugas prodiakon (format Excel paroki): A4 tegak, satu blok per jam misa, kolom per akhir pekan,
-//    header berwarna liturgi, koordinator biru tebal di posisinya, misa khusus di blok kuning, keterangan warna
-const LIT_FILL = { '': [217, 217, 217], hijau: [146, 208, 80], putih: [255, 255, 255], merah: [255, 0, 0], ungu: [204, 153, 255], 'merah muda': [255, 153, 204] };
-const LIT_PDF_TEXT = { merah: 255 };
+// 1) Jadwal tugas prodiakon: satu bulan dalam satu halaman A4 mendatar.
+//    Baris = jam misa rutin, kolom = akhir pekan; tiap misa berupa kartu dengan header berwarna liturgi,
+//    nama petugas dua kolom, koordinator berlatar biru tebal. Misa khusus/harian sebagai kartu kuning di bawah.
+const LIT_RGB = { '': [156, 163, 175], hijau: [34, 197, 94], putih: [203, 213, 225], merah: [239, 68, 68], ungu: [168, 85, 247], 'merah muda': [244, 114, 182], kuning: [250, 204, 21] };
+const tint = (c, k) => c.map(v => Math.round(v + (255 - v) * k));
 async function reportJadwal(ym) {
   const jsPDF = await loadPdfLib();
   const { misa } = await reportData(ym);
-  // Usahakan satu bulan muat satu halaman: bila belum muat, huruf & jarak baris diperkecil
+  // Huruf diperkecil bertahap sampai sebulan muat satu halaman
   let doc;
-  for (const [FS, PAD, GAP] of [[7, 0.55, 3.5], [6.3, 0.4, 2.6], [5.6, 0.28, 2], [5, 0.2, 1.6]]) {
-    doc = buildJadwalPdf(jsPDF, ym, misa, FS, PAD, GAP);
-    if (doc.getNumberOfPages() === 1) break;
+  for (const FS of [7.5, 7, 6.5, 6, 5.5, 5]) {
+    doc = buildJadwalPdf(jsPDF, ym, misa, FS, FS === 5);
+    if (doc) break;
   }
   pdfFooter(doc);
   doc.save(`jadwal-prodiakon-${ym}.pdf`);
 }
-function buildJadwalPdf(jsPDF, ym, misa, FS, PAD, GAP) {
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-  const PW = doc.internal.pageSize.getWidth(), M = 7, CW = PW - 2 * M;
+// Mengembalikan null bila tidak muat satu halaman (kecuali force: lanjut ke halaman berikut)
+function buildJadwalPdf(jsPDF, ym, misa, FS, force) {
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight(), M = 8, BOTTOM = PH - 11;
+  const LH = FS * 0.3528 * 1.32, GAP = 2.4, BRAND = [20, 83, 45], KOOR = [219, 234, 254], KOOR_INK = [29, 78, 216];
   const W = weekendsOf(ym);
-  const KOOR = [184, 204, 228], YELLOW = [255, 255, 102], LINE = [90, 90, 90];
-  const base = { fontSize: FS, cellPadding: PAD, halign: 'center', valign: 'middle', lineColor: LINE, lineWidth: 0.15, textColor: 20, overflow: 'ellipsize' };
-  // Judul: kotak "JADWAL TUGAS PRODIAKON" + kotak bulan
-  doc.autoTable({
-    startY: M, margin: { left: M, right: M }, theme: 'grid',
-    body: [[{ content: 'JADWAL TUGAS PRODIAKON' }, { content: monthShort(ym) }]],
-    styles: { ...base, fontSize: 11, fontStyle: 'bold', cellPadding: 1.2 },
-    columnStyles: { 1: { cellWidth: CW / 5 } },
-  });
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(90);
-  doc.text(`Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''}`, M, doc.lastAutoTable.finalY + 3);
-  let y = doc.lastAutoTable.finalY + 5;
-  const litStyle = (d, m) => {
-    const c = m ? m.color || '' : '';
-    d.cell.styles.fillColor = LIT_FILL[c] || LIT_FILL[''];
-    d.cell.styles.textColor = LIT_PDF_TEXT[c] ?? 0;
-    d.cell.styles.fontStyle = 'bold';
+  let y = M;
+  const fits = h => {
+    if (y + h <= BOTTOM) return true;
+    if (!force) return false;
+    doc.addPage(); y = M; return true;
   };
+  // Kepala halaman
+  doc.setFillColor(...BRAND); doc.roundedRect(M, y, 11, 11, 2, 2, 'F');
+  doc.setTextColor(250, 204, 21); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text('+', M + 5.5, y + 7.6, { align: 'center' });
+  doc.setTextColor(20, 83, 45); doc.setFontSize(7.5); doc.text(`PAROKI ${P.nama.toUpperCase()}${P.kota ? ' · ' + P.kota.toUpperCase() : ''}`, M + 14, y + 3.6);
+  doc.setTextColor(17, 24, 39); doc.setFontSize(15); doc.text('Jadwal Tugas Prodiakon', M + 14, y + 9.6);
+  doc.setFontSize(13); doc.text(monthName(ym), PW - M, y + 6, { align: 'right' });
+  // keterangan warna di kanan atas
+  let lx = PW - M; doc.setFontSize(6.5); doc.setFont('helvetica', 'normal');
+  for (const c of Object.keys(COLORS).filter(Boolean).reverse()) {
+    const t = COLORS[c][0], tw = doc.getTextWidth(t);
+    lx -= tw; doc.setTextColor(75, 85, 99); doc.text(t, lx, y + 10.6);
+    lx -= 3; doc.setFillColor(...LIT_RGB[c]); doc.circle(lx + 1.1, y + 9.9, 1.1, 'F'); lx -= 2.5;
+  }
+  lx -= doc.getTextWidth('Koordinator') + 2; doc.setFillColor(...KOOR); doc.roundedRect(lx - 1, y + 8.3, doc.getTextWidth('Koordinator') + 2, 3, .8, .8, 'F');
+  doc.setTextColor(...KOOR_INK); doc.setFont('helvetica', 'bold'); doc.text('Koordinator', lx, y + 10.6);
+  y += 13; doc.setDrawColor(...BRAND); doc.setLineWidth(.5); doc.line(M, y, PW - M, y); y += 3;
+
+  // Kartu satu misa: header berwarna liturgi + nama 2 kolom (urutan sesuai jadwal, turun per kolom)
+  const card = (m, x, cy, w, h, head) => {
+    const lit = LIT_RGB[m.color] || LIT_RGB[''];
+    doc.setDrawColor(209, 213, 219); doc.setLineWidth(.25); doc.setFillColor(255, 255, 255);
+    doc.roundedRect(x, cy, w, h, 1.6, 1.6, 'FD');
+    doc.setFillColor(...tint(lit, .82)); doc.rect(x + .15, cy + 1.3, w - .3, head - 1.3, 'F');
+    doc.setFillColor(...lit); doc.roundedRect(x, cy, w, 1.6, .8, .8, 'F'); doc.rect(x, cy + .8, w, .8, 'F');
+    doc.setTextColor(17, 24, 39); doc.setFont('helvetica', 'bold'); doc.setFontSize(FS + 0.6);
+    const d = parseD(m.date);
+    doc.text(`${DAYS[d.getDay()].slice(0, 3)} ${d.getDate()} ${MON3[d.getMonth()]}${m.time ? ' · ' + m.time : ''}`, x + 1.6, cy + 1.6 + LH * 1.05);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(FS - 0.8); doc.setTextColor(55, 65, 81);
+    const cnt = `${m.officers.length}${m.need ? '/' + m.need : ''}`;
+    doc.text(cnt, x + w - 1.6, cy + 1.6 + LH * 1.05, { align: 'right' });
+    const sub = [m.slot === 'LAIN' ? m.title : (m.title && m.title !== 'Minggu Biasa' ? m.title : ''), COLORS[m.color]?.[0] && m.color ? COLORS[m.color][0] : '', m.slot === 'LAIN' ? m.place : '']
+      .filter(Boolean).join(' · ');
+    if (sub) doc.text(doc.splitTextToSize(sub, w - 3)[0], x + 1.6, cy + 1.6 + LH * 1.95);
+    const names = m.officers.length ? m.officers : (m.note ? [m.note] : []);
+    const half = Math.ceil(names.length / 2), cw = (w - 3) / 2;
+    doc.setFontSize(FS);
+    names.forEach((n, i) => {
+      const col = i < half ? 0 : 1, row = i < half ? i : i - half;
+      const nx = x + 1.5 + col * cw, ny = cy + head + LH * (row + 0.85);
+      const isK = m.coordinator && norm(n) === norm(m.coordinator);
+      if (isK) { doc.setFillColor(...KOOR); doc.roundedRect(nx - .5, ny - LH * .78, cw - .4, LH * 1.02, .6, .6, 'F'); }
+      doc.setFont('helvetica', isK ? 'bold' : 'normal'); doc.setTextColor(...(isK ? KOOR_INK : [17, 24, 39]));
+      doc.text(doc.splitTextToSize(n, cw - 1.2)[0], nx, ny);
+    });
+  };
+  const headH = 1.6 + LH * 2.35;
+  const labelW = 13, colGap = 2;
   for (const k of REGULAR) {
     const cols = W.map((_, i) => misaOfWeek(misa, ym, k, i));
     if (!cols.some(Boolean)) continue;
-    const sl = slotByKey(k), dayName = DAYS[sl.day].toUpperCase();
-    const head = [
-      cols.map((m, i) => m ? `TGL. ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}` : `${W[i].label} - ${dayName}`),
-      cols.map(m => `WARNA LITURGI : ${m ? (COLORS[m.color] || COLORS[''])[0].toUpperCase() : '-'}`),
-      cols.map(m => (m?.title || '-').toUpperCase()),
-      cols.map(m => `${k} - PK. ${m?.time || sl.time}`),
-    ];
-    // baris sebanyak petugas terbanyak yang sudah terisi (seperti Excel)
-    const n = Math.max(1, ...cols.map(m => m?.officers.length || 0));
-    const lists = cols.map(m => (m ? [...m.officers] : []));
-    const body = Array.from({ length: n }, (_, r) => lists.map(l => l[r] || ''));
-    doc.autoTable({
-      startY: y, head, body, theme: 'grid', margin: { left: M, right: M }, rowPageBreak: 'avoid',
-      styles: base, headStyles: { fontSize: FS - 0.4, cellPadding: PAD },
-      didParseCell: d => {
-        const m = cols[d.column.index];
-        if (d.section === 'head') return litStyle(d, m);
-        if (m && d.cell.raw && norm(d.cell.raw) === norm(m.coordinator)) { d.cell.styles.fillColor = KOOR; d.cell.styles.fontStyle = 'bold'; }
-      },
-    });
-    y = doc.lastAutoTable.finalY + GAP;
+    const rows = Math.max(1, ...cols.map(m => Math.ceil((m?.officers.length || 0) / 2)));
+    const h = headH + LH * rows + 1.2;
+    if (!fits(h)) return null;
+    const sl = slotByKey(k);
+    doc.setFillColor(...BRAND); doc.roundedRect(M, y, labelW - 1.5, 5, 1, 1, 'F');
+    doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.text(k, M + (labelW - 1.5) / 2, y + 3.6, { align: 'center' });
+    doc.setTextColor(75, 85, 99); doc.setFont('helvetica', 'normal'); doc.setFontSize(6.3);
+    doc.text(DAYS[sl.day], M, y + 8.5); doc.text(sl.time, M, y + 11.3);
+    const cw = (PW - 2 * M - labelW - colGap * (W.length - 1)) / W.length;
+    cols.forEach((m, i) => { if (m) card(m, M + labelW + i * (cw + colGap), y, cw, h, headH); });
+    y += h + GAP;
   }
-  // Misa khusus: kolom kuning (maks. 5 per baris) — tanggal & hari, nama misa, tempat & jam, lalu petugas
+  // Misa khusus & harian: kartu kuning kecil, 6 per baris
   const lain = misa.filter(m => m.slot === 'LAIN').sort(cmpMisa);
-  for (let i = 0; i < lain.length; i += 5) {
-    const part = lain.slice(i, i + 5);
-    const head = [
-      part.map(m => `TGL ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}`),
-      part.map(m => (m.title || 'Misa').toUpperCase()),
-      part.map(m => [m.place && m.place.toUpperCase(), m.time && `PK. ${m.time}`].filter(Boolean).join(' - ') || '-'),
-    ];
-    const n = Math.max(1, ...part.map(m => Math.max(m.officers.length, m.note ? 1 : 0)));
-    const body = Array.from({ length: n }, (_, r) => part.map(m => m.officers[r] || (!m.officers.length && r === 0 && m.note ? m.note.toUpperCase() : '')));
-    doc.autoTable({
-      startY: y, head, body, theme: 'grid', margin: { left: M, right: M + (5 - part.length) * (CW / 5) }, rowPageBreak: 'avoid',
-      styles: base, headStyles: { fillColor: YELLOW, textColor: 0, fontStyle: 'bold', fontSize: FS - 0.4, cellPadding: PAD },
-      didParseCell: d => {
-        const m = part[d.column.index];
-        if (d.section === 'body' && m && d.cell.raw && norm(d.cell.raw) === norm(m.coordinator)) { d.cell.styles.fillColor = KOOR; d.cell.styles.fontStyle = 'bold'; }
-      },
-    });
-    y = doc.lastAutoTable.finalY + GAP;
+  if (lain.length) {
+    if (!fits(6)) return null;
+    doc.setTextColor(180, 83, 9); doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.text('MISA KHUSUS & HARIAN', M, y + 3); y += 4.5;
+    const per = 6, cw = (PW - 2 * M - colGap * (per - 1)) / per;
+    for (let i = 0; i < lain.length; i += per) {
+      const part = lain.slice(i, i + per);
+      const rows = Math.max(1, ...part.map(m => Math.ceil(Math.max(m.officers.length, m.note ? 1 : 0) / 2)));
+      const h = headH + LH * rows + 1.2;
+      if (!fits(h)) return null;
+      part.forEach((m, j) => card({ ...m, color: m.color || 'kuning' }, M + j * (cw + colGap), y, cw, h, headH));
+      y += h + GAP;
+    }
   }
-  // Keterangan: koordinator + warna liturgi
-  const lit = Object.keys(LIT_FILL).filter(Boolean);
-  doc.autoTable({
-    startY: y, body: [['NAMA', ': KOORDINATOR']].concat(lit.map(c => [COLORS[c][0].toUpperCase(), ': WARNA LITURGI'])),
-    theme: 'plain', margin: { left: M, right: PW - M - 62 }, rowPageBreak: 'avoid',
-    styles: { fontSize: FS - 0.4, cellPadding: PAD, textColor: 0, valign: 'middle' },
-    columnStyles: { 0: { cellWidth: 26, halign: 'center', fontStyle: 'bold', lineWidth: 0.15, lineColor: LINE } },
-    didParseCell: d => {
-      if (d.column.index !== 0) return;
-      if (d.row.index === 0) d.cell.styles.fillColor = KOOR;
-      else { const c = lit[d.row.index - 1]; d.cell.styles.fillColor = LIT_FILL[c]; d.cell.styles.textColor = LIT_PDF_TEXT[c] ?? 0; }
-    },
-  });
   return doc;
 }
 
