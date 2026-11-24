@@ -58,6 +58,13 @@
     details { border-top: 1px solid var(--line); padding: 8px 0; }
     details:first-of-type { border-top: 0; }
     summary { cursor: pointer; font-weight: 600; }
+    .tabs { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tabs a { flex: none; text-decoration: none; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 99px; padding: 6px 12px; font-size: .9rem; font-weight: 600; }
+    .tabs a.on { background: var(--brand); border-color: var(--brand); color: #fff; }
+    .intro { margin: 2px 2px 12px; color: var(--muted); }
+    main { counter-reset: bab; }
+    section:not([hidden]) h2::before { counter-increment: bab; content: counter(bab) ". "; }
     footer { text-align: center; color: var(--muted); font-size: .85rem; margin-top: 24px; }
     a.top { display: inline-block; margin-top: 8px; font-size: .85rem; color: var(--muted); }
   </style>
@@ -72,35 +79,18 @@
   </header>
 
   <main>
-    <nav class="toc" id="isi">
-      <b>Daftar isi</b>
-      <ol>
-        <li><a href="#mulai">Mulai: daftar, masuk &amp; pasang di HP</a></li>
-        <li><a href="#layar">Mengenal layar aplikasi</a></li>
-        <li><a href="#saya">Tab Saya — jadwal pribadi</a></li>
-        <li><a href="#notif">Notifikasi pengingat</a></li>
-        <li><a href="#koor">Untuk koordinator: absen petugas</a></li>
-        <li><a href="#bulan">Admin: membuat jadwal bulan baru</a></li>
-        <li><a href="#misa">Admin: mengisi petugas misa</a></li>
-        <li><a href="#hantaran">Admin: mengatur hantaran</a></li>
-        <li><a href="#master">Admin: data master</a></li>
-        <li><a href="#cek">Admin: tab Cek</a></li>
-        <li><a href="#cetak">Cetak, laporan PDF &amp; poster</a></li>
-        <li><a href="#pengguna">Admin: menyetujui pengguna</a></li>
-        <li><a href="#super">Super admin</a></li>
-        <li><a href="#faq">Pertanyaan yang sering muncul</a></li>
-      </ol>
-    </nav>
-
-    <div class="roles">
-      <div class="role"><b>👤 Petugas</b>Melihat jadwal sendiri &amp; seluruh jadwal paroki.</div>
-      <div class="role"><b>⭐ Koordinator</b>Petugas yang ditunjuk memimpin satu misa; mengisi absen.</div>
-      <div class="role"><b>🛠️ Admin paroki</b>Membuat &amp; mengubah jadwal serta data paroki.</div>
-      <div class="role"><b>🏛️ Super admin</b>Mengelola semua paroki.</div>
+    <div class="tabs" role="tablist" aria-label="Panduan untuk">
+      <a href="?peran=petugas" data-peran="petugas">👤 Petugas</a>
+      <a href="?peran=koordinator" data-peran="koordinator">⭐ Koordinator</a>
+      <a href="?peran=admin" data-peran="admin">🛠️ Admin</a>
+      <a href="?peran=super" data-peran="super">🏛️ Super admin</a>
+      <a href="?peran=semua" data-peran="semua">Semua</a>
     </div>
+    <p class="intro" id="intro"></p>
+    <nav class="toc" id="isi"><b>Daftar isi</b><ol id="tocList"></ol></nav>
 
-    <section id="mulai">
-      <h2>1. Mulai: daftar, masuk &amp; pasang di HP</h2>
+    <section id="mulai" data-peran="petugas">
+      <h2>Mulai: daftar, masuk &amp; pasang di HP</h2>
       <h3>Mendaftar</h3>
       <ol>
         <li>Buka link aplikasi dari admin paroki. Sebaiknya link yang berakhiran <b>?p=…</b>, supaya paroki Anda langsung terpilih.</li>
@@ -120,8 +110,8 @@
       <p>Setelah itu buka aplikasi dari ikonnya, seperti aplikasi biasa. Di iPhone, notifikasi <b>hanya bisa</b> dari ikon ini.</p>
     </section>
 
-    <section id="layar">
-      <h2>2. Mengenal layar aplikasi</h2>
+    <section id="layar" data-peran="petugas">
+      <h2>Mengenal layar aplikasi</h2>
       <ul>
         <li><b>Bagian atas</b>: nama paroki, pilihan <b>bulan</b>, peran Anda, dan tombol <b>⋮ Menu</b>.</li>
         <li><b>Menu bawah</b>:
@@ -140,8 +130,8 @@
       <div class="tip">🌓 Tampilan terang/gelap bisa diatur di <b>Menu ⋮ → Tampilan</b>: Otomatis (ikut HP), Terang, atau Gelap.</div>
     </section>
 
-    <section id="saya">
-      <h2>3. Tab Saya — jadwal pribadi <span class="who">semua</span></h2>
+    <section id="saya" data-peran="petugas koordinator">
+      <h2>Tab Saya — jadwal pribadi <span class="who">semua</span></h2>
       <ul>
         <li>Menampilkan <b>Misa saya</b> dan <b>Hantaran saya</b> bulan ini. Tugas terdekat ditandai <b>Berikutnya</b>.</li>
         <li>Pada tugas hantaran tercantum nama umat, alamat (tombol <b>Peta</b>), dan nomor telepon/WA.</li>
@@ -151,8 +141,8 @@
       <p>Ganti bulan dengan menekan nama bulan di bagian atas.</p>
     </section>
 
-    <section id="notif">
-      <h2>4. Notifikasi pengingat <span class="who">semua</span></h2>
+    <section id="notif" data-peran="petugas koordinator">
+      <h2>Notifikasi pengingat <span class="who">semua</span></h2>
       <p>Aplikasi bisa mengirim pengingat <b>H-1 pukul 18.00</b> sebelum Anda bertugas, juga kabar persetujuan akun.</p>
       <ol>
         <li>Di tab <b>Saya</b> tekan <span class="btn">Aktifkan</span> pada kotak "Dapatkan pengingat H-1", atau lewat <b>Menu ⋮ → Profil saya</b>.</li>
@@ -168,8 +158,8 @@
       </div>
     </section>
 
-    <section id="koor">
-      <h2>5. Untuk koordinator: absen petugas <span class="who">koordinator</span></h2>
+    <section id="koor" data-peran="koordinator">
+      <h2>Untuk koordinator: absen petugas <span class="who">koordinator</span></h2>
       <p>Bila Anda koordinator suatu misa, pada <b>hari misa</b> muncul kotak "Hari ini Anda koordinator" di tab Saya.</p>
       <ol>
         <li>Tekan <span class="btn">📋 Mulai absen</span> (atau <span class="btn">Absen petugas</span> di kartu misa).</li>
@@ -180,8 +170,8 @@
       <p>Absen bisa dibuka lagi dan diperbaiki bila ada yang keliru.</p>
     </section>
 
-    <section id="bulan">
-      <h2>6. Membuat jadwal bulan baru <span class="who">admin</span></h2>
+    <section id="bulan" data-peran="admin">
+      <h2>Membuat jadwal bulan baru <span class="who">admin</span></h2>
       <ol>
         <li>Buka <b>Menu ⋮ → 📅 Buat bulan baru</b>.</li>
         <li>Pilih bulannya. Biarkan tercentang:
@@ -195,8 +185,8 @@
       <div class="tip">💡 Label minggu dan catatan untuk petugas hantaran bisa diubah di <b>Menu ⋮ → ⚙️ Pengaturan bulan ini</b>. Dari situ juga bulan bisa dihapus (sebaiknya backup dulu).</div>
     </section>
 
-    <section id="misa">
-      <h2>7. Mengisi petugas misa <span class="who">admin</span></h2>
+    <section id="misa" data-peran="admin">
+      <h2>Mengisi petugas misa <span class="who">admin</span></h2>
       <h3>Satu per satu</h3>
       <ol>
         <li>Di tab <b>Misa</b>, tekan kartu misanya.</li>
@@ -216,8 +206,8 @@
       </ul>
     </section>
 
-    <section id="hantaran">
-      <h2>8. Mengatur hantaran <span class="who">admin</span></h2>
+    <section id="hantaran" data-peran="admin">
+      <h2>Mengatur hantaran <span class="who">admin</span></h2>
       <p>Hantaran = layanan mengantar Komuni (SMK) ke umat yang sakit/lansia setelah misa. Setiap <b>grup</b> berisi satu atau beberapa umat dan dilayani satu petugas tiap minggu.</p>
       <h3>Mengubah grup</h3>
       <ol>
@@ -237,8 +227,8 @@
       <div class="note">Petugas hantaran otomatis <b>ditambahkan ke misa</b> pada hari &amp; jam yang sama, karena setelah misa langsung mengantar.</div>
     </section>
 
-    <section id="master">
-      <h2>9. Data master <span class="who">admin</span></h2>
+    <section id="master" data-peran="admin">
+      <h2>Data master <span class="who">admin</span></h2>
       <p>Buka dari <b>Menu ⋮ → Master data</b>.</p>
       <h3>👤 Master petugas</h3>
       <ul>
@@ -258,8 +248,8 @@
       <p>Kartu "Didukung oleh …" di bawah tab Saya dan Misa, dengan periode tayang.</p>
     </section>
 
-    <section id="cek">
-      <h2>10. Tab Cek <span class="who">admin</span></h2>
+    <section id="cek" data-peran="admin">
+      <h2>Tab Cek <span class="who">admin</span></h2>
       <p>Daftar hal yang perlu dibereskan. Contohnya:</p>
       <ul>
         <li>Grup hantaran yang belum ada petugasnya.</li>
@@ -271,8 +261,8 @@
       <p>Tekan salah satu baris untuk langsung membuka data terkait. Tanggal yang sudah lewat tidak ditampilkan. Angka merah di ikon Cek = jumlah masalah.</p>
     </section>
 
-    <section id="cetak">
-      <h2>11. Cetak, laporan PDF &amp; poster</h2>
+    <section id="cetak" data-peran="petugas admin">
+      <h2>Cetak, laporan PDF &amp; poster</h2>
       <ul>
         <li><b>🖨️ Cetak jadwal</b> (Menu ⋮): pilih satu bulan, minggu tertentu, rentang tanggal, atau Sabtu–Minggu saja.</li>
         <li><b>📑 Laporan (PDF)</b>: jadwal tugas per jam misa, daftar petugas hantaran (dengan alamat umat), dan <b>rekap kehadiran</b> (admin).</li>
@@ -283,8 +273,8 @@
       <div class="tip">🔒 Laporan hantaran memuat alamat &amp; nomor umat — bagikan hanya ke petugas.</div>
     </section>
 
-    <section id="pengguna">
-      <h2>12. Menyetujui pengguna <span class="who">admin</span></h2>
+    <section id="pengguna" data-peran="admin super">
+      <h2>Menyetujui pengguna <span class="who">admin</span></h2>
       <ol>
         <li>Buka <b>Menu ⋮ → 👥 Pengguna</b>. Pendaftar baru ada di bagian <b>Menunggu persetujuan</b>.</li>
         <li>Pilih <b>Nama di jadwal</b> untuk menautkan akun ke petugas yang sudah ada. Bila dikosongkan, nama pendaftar ditambahkan ke Master petugas.</li>
@@ -293,8 +283,8 @@
       <p>Tombol lain: <b>Jadikan admin</b>, <b>Cabut akses</b>, dan (super admin) <b>Hapus akun</b>.</p>
     </section>
 
-    <section id="super">
-      <h2>13. Super admin <span class="who">super admin</span></h2>
+    <section id="super" data-peran="super">
+      <h2>Super admin <span class="who">super admin</span></h2>
       <ul>
         <li><b>🏛️ Master paroki</b>: tambah paroki baru, ubah data, salin link pendaftaran paroki (<code>?p=kode</code>).</li>
         <li><b>🔁 Ganti paroki</b>: pindah ke paroki lain — lewat menu atau dengan menekan nama paroki di bagian atas.</li>
@@ -302,8 +292,8 @@
       </ul>
     </section>
 
-    <section id="faq">
-      <h2>14. Pertanyaan yang sering muncul</h2>
+    <section id="faq" data-peran="petugas koordinator admin super">
+      <h2>Pertanyaan yang sering muncul</h2>
       <details><summary>Saya sudah daftar tapi tidak bisa melihat jadwal.</summary>
         <p>Akun menunggu persetujuan admin paroki. Hubungi admin, lalu tekan <b>Cek lagi</b> setelah disetujui.</p></details>
       <details><summary>Daftar paroki kosong saat mendaftar.</summary>
@@ -323,5 +313,32 @@
       <a class="top" href="#isi">↑ Kembali ke daftar isi</a>
     </footer>
   </main>
+  <script>
+    // Panduan per peran: ?peran=petugas | koordinator | admin | super | semua (bawaan: petugas)
+    (function () {
+      var INTRO = {
+        petugas: 'Untuk petugas prodiakon: melihat jadwal sendiri & seluruh jadwal paroki.',
+        koordinator: 'Untuk koordinator misa: petugas yang ditunjuk memimpin satu misa dan mengisi absen.',
+        admin: 'Untuk admin paroki: membuat & mengubah jadwal serta data paroki.',
+        super: 'Untuk super admin: mengelola semua paroki.',
+        semua: 'Seluruh isi panduan untuk semua peran.'
+      };
+      var q = new URLSearchParams(location.search).get('peran');
+      var peran = INTRO[q] ? q : 'petugas';
+      document.querySelectorAll('.tabs a').forEach(function (a) { a.classList.toggle('on', a.dataset.peran === peran); });
+      document.getElementById('intro').textContent = INTRO[peran];
+      var toc = document.getElementById('tocList');
+      document.querySelectorAll('section[data-peran]').forEach(function (sec) {
+        var show = peran === 'semua' || sec.dataset.peran.split(' ').indexOf(peran) >= 0;
+        sec.hidden = !show;
+        if (!show) return;
+        var h = sec.querySelector('h2').cloneNode(true), w = h.querySelector('.who');
+        if (w) w.remove();
+        var li = document.createElement('li'), a = document.createElement('a');
+        a.href = '#' + sec.id; a.textContent = h.textContent.trim(); li.appendChild(a); toc.appendChild(li);
+      });
+      if (peran !== 'semua') document.querySelectorAll('.who').forEach(function (w) { w.remove(); });
+    })();
+  </script>
 </body>
 </html>

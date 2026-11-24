@@ -1442,6 +1442,21 @@ async function openSwitchParoki() {
   });
 }
 
+// Panduan dipisah per peran (panduan.html?peran=…); admin & super admin hanya tampil untuk perannya
+function openGuide() {
+  const items = [
+    ['petugas', '👤 Panduan petugas', 'Jadwal saya, notifikasi, cetak & bagikan'],
+    ['koordinator', '⭐ Panduan koordinator', 'Absen petugas pada hari misa'],
+    S.admin && ['admin', '🛠️ Panduan admin', 'Buat bulan, isi misa & hantaran, data master, pengguna'],
+    S.super && ['super', '🏛️ Panduan super admin', 'Paroki, ganti paroki, pendaftar paroki lain'],
+  ].filter(Boolean);
+  const body = `<div class="menu-list">${items.map(([k, l, d]) =>
+    `<button type="button" data-sh="guide" data-k="${k}">${h(l)}<div class="hint">${h(d)}</div></button>`).join('')}</div>`;
+  openSheet('Panduan', body, {
+    onClick: b => { if (b.dataset.sh === 'guide') { window.open(`panduan.html?peran=${b.dataset.k}`, '_blank', 'noopener'); dlg.close(); } },
+  });
+}
+
 function openTheme() {
   const cur = themeNow();
   const body = `<div class="menu-list">${Object.entries(THEMES).map(([k, l]) =>
@@ -1473,7 +1488,7 @@ function openMenu() {
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
     S.months.length && ['reports', '📑 Laporan (PDF)'],
     ['theme', `🌓 Tampilan: ${THEMES[themeNow()]}`],
-    ['guide', '📖 Panduan aplikasi'],
+    ['guide', '📖 Panduan'],
     ONLINE && ['profile', '👤 Profil saya'],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
@@ -1493,7 +1508,7 @@ async function menuAction(k) {
   if (k === 'users') return run(openUsers);
   if (k === 'profile') return openProfile();
   if (k === 'theme') return openTheme();
-  if (k === 'guide') return window.open('panduan.html', '_blank', 'noopener');
+  if (k === 'guide') return openGuide();
   if (k === 'switch-paroki') return run(openSwitchParoki);
   if (k === 'reports') return openReports();
   if (k === 'paroki-settings') return openParokiForm(P);
