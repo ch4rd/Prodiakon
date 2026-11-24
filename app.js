@@ -1597,43 +1597,52 @@ function printView(misaList = S.misa, subtitle = '') {
       <tbody>${rows}</tbody></table>
       ${curMonth().notes ? `<p style="white-space:pre-wrap"><b>Catatan:</b>\n${h(curMonth().notes)}</p>` : ''}`;
   } else {
-    let html = ''; // judul ditulis per halaman
-    const table = list => {
-      const max = Math.max(...list.map(m => Math.max(m.officers.length, m.need || 0)), 1);
-      let t = `<table><thead>
-        <tr>${list.map(m => `<th>${h(fmtShort(m.date).toUpperCase())}</th>`).join('')}</tr>
-        <tr>${list.map(m => `<th>${h(m.title || '')}${m.color ? ' · ' + h(COLORS[m.color]?.[0] || m.color) : ''}</th>`).join('')}</tr>
-        <tr>${list.map(m => `<th>${m.slot === 'LAIN' ? '' : h(m.slot) + ' – '}${h([m.place, m.time && 'pk ' + m.time].filter(Boolean).join(' '))}</th>`).join('')}</tr>
-        </thead><tbody>`;
-      for (let i = 0; i < max; i++) {
-        t += '<tr>' + list.map(m => {
-          const n = m.officers[i] || '';
-          return `<td class="${n && norm(n) === norm(m.coordinator) ? 'k' : ''}">${h(n || (i === 0 && m.note ? m.note : ''))}</td>`;
-        }).join('') + '</tr>';
-      }
-      return t + '</tbody></table>';
+    let html = '';
+    const LIT_INK = { ungu: '#fff', merah: '#fff' };
+    const logo = P.logo ? `<img class="lg" src="${h(P.logo)}" alt="">` : '<div class="lg">✝</div>';
+    // Satu kartu per misa: header berwarna liturgi, daftar petugas bernomor, koordinator ★ (tetap terbaca tanpa warna)
+    const card = m => {
+      const col = COLORS[m.color] || COLORS[''];
+      const lc = m.color ? col[1] : '#9ca3af', koor = norm(m.coordinator);
+      const empty = Math.max(0, (m.need || 0) - m.officers.length);
+      const li = m.officers.map(n => (norm(n) === koor
+        ? `<li class="k">${h(n)} <small>koordinator</small></li>` : `<li>${h(n)}</li>`)).join('')
+        + '<li class="e"><span></span></li>'.repeat(empty);
+      return `<div class="misa" style="--lc:${lc};--lt:${LIT_INK[m.color] || '#111827'}">
+        <div class="mh"><div class="r1"><span class="slot${m.slot === 'LAIN' ? ' khusus' : ''}">${m.slot === 'LAIN' ? 'Khusus' : h(m.slot)}</span>${m.color ? `<span class="lit">${h(col[0])}</span>` : ''}</div>
+          <div class="day">${h(fmtShort(m.date).replace(/^(\w{3})\w*/, (_, d) => DAYS.find(x => x.startsWith(d)) || d))}</div>
+          <div class="time">${h([m.time && 'pk ' + m.time, m.place].filter(Boolean).join(' · '))}</div>
+          ${m.title ? `<div class="title">${h(m.title)}</div>` : ''}${m.note ? `<div class="title">📝 ${h(m.note)}</div>` : ''}</div>
+        <ol class="pt">${li || '<li class="e"><span></span></li>'}</ol>
+        <div class="cnt">${m.officers.length}${m.need ? ` / ${m.need}` : ''} petugas</div></div>`;
     };
-    // Satu halaman per akhir pekan: Sabtu lalu Minggu besoknya (misa khusus di minggu itu ikut), urut tanggal & jam
+    const legend = `<div class="pfoot"><div class="leg"><span><b class="kk">★ Nama</b> koordinator</span><span class="le">- - - belum terisi</span>
+      ${Object.entries(COLORS).filter(([k]) => k).map(([, c]) => `<span><i style="background:${c[1]}"></i>${h(c[0])}</span>`).join('')}</div>
+      <div>Dicetak ${h(fmtShort(todayIso()))} ${new Date().getFullYear()} · Prodiakon ${h(P.nama)}</div></div>`;
+    // Satu halaman per akhir pekan (misa khusus di minggu itu ikut), maks. 5 kartu per halaman
     const byWeek = new Map();
     for (const m of [...misaList].sort(cmpMisa)) {
       const k = weekKey(m.date);
       if (!byWeek.has(k)) byWeek.set(k, []);
       byWeek.get(k).push(m);
     }
-    const pages = [...byWeek.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([sun, list]) => {
+    const pages = [];
+    for (const [sun, list] of [...byWeek.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
       const sat = parseD(sun); sat.setDate(sat.getDate() - 1);
       const first = list[0].date, last = list[list.length - 1].date;
       const range = first === iso(sat) && last === sun
-        ? `Sabtu, ${sat.getDate()} – Minggu, ${fmtLong(sun).split(', ')[1]}`
+        ? `Sabtu, ${sat.getDate()} – Minggu, ${fmtLong(sun).split(', ')[1]} ${parseD(sun).getFullYear()}`
         : first === last ? fmtLong(first) : `${fmtLong(first)} – ${fmtLong(last)}`;
-      let pg = `<section class="pg"><h2>JADWAL TUGAS PRODIAKON – ${h((subtitle || title).toUpperCase())}</h2>
-        <h3>${h(range)}</h3>`;
-      // Misa hari biasa (mis. Kamis/Jumat) di tabel sendiri; Sabtu + Minggu tetap utuh satu tabel
-      const wkend = list.filter(m => [0, 6].includes(parseD(m.date).getDay())), other = list.filter(m => !wkend.includes(m));
-      const chunks = l => { for (let i = 0; i < l.length; i += 7) pg += table(l.slice(i, i + 7)); }; // maks 7 kolom
-      chunks(other); chunks(wkend);
-      return pg + '<p class="foot">Sel biru = koordinator.</p></section>';
-    });
+      const titles = [...new Set(list.map(m => m.title).filter(Boolean))].join(' · ');
+      for (let i = 0; i < list.length; i += 5) {
+        const part = list.slice(i, i + 5);
+        const rows = Math.max(...part.map(m => Math.max(m.officers.length, m.need || 0)), 1);
+        pages.push(`<section class="pg pmisa${rows > 20 ? ' dense' : ''}">
+          <div class="phead">${logo}<div class="t"><div class="kk2">Paroki ${h(P.nama)}${P.kota ? ' · ' + h(P.kota) : ''}</div><h1>Jadwal Tugas Prodiakon</h1></div>
+            <div class="rr"><div class="d">${h(range)}</div><div class="m">${h(titles || subtitle || title)}</div></div></div>
+          <div class="cols" style="--n:${part.length}">${part.map(card).join('')}</div>${legend}</section>`);
+      }
+    }
     html += pages.join('') || '<p>Belum ada jadwal misa.</p>';
     p.innerHTML = html;
   }

@@ -373,6 +373,45 @@ a.link-btn { text-decoration: none; display: inline-block; }
   .print-only h3 { font-size: 11pt; margin: 0 0 8px; }
   .print-only .foot { font-size: 8pt; color: #444; }
 }
+/* Cetak jadwal misa: kartu per misa berwarna liturgi. print-color-adjust supaya warna tetap tercetak
+   (Chrome Android tidak punya pilihan "Background graphics"). */
+@media print {
+  .print-only, .print-only * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .print-only .pmisa { height: 188mm; display: flex; flex-direction: column; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #111827; }
+  .pmisa .phead { display: flex; align-items: center; gap: 4mm; padding-bottom: 3mm; border-bottom: .6mm solid #14532d; }
+  .pmisa .lg { width: 13mm; height: 13mm; border-radius: 3mm; background: #14532d; color: #facc15; display: grid; place-items: center; font-size: 8mm; font-weight: 800; flex: none; object-fit: contain; }
+  .pmisa img.lg { background: #fff; }
+  .pmisa .t { flex: 1; }
+  .pmisa .kk2 { font-size: 8pt; letter-spacing: .1em; text-transform: uppercase; color: #14532d; font-weight: 700; }
+  .pmisa h1 { margin: .5mm 0 0; font-size: 17pt; line-height: 1.1; }
+  .pmisa .rr { text-align: right; }
+  .pmisa .rr .d { font-size: 12pt; font-weight: 800; }
+  .pmisa .rr .m { font-size: 9pt; color: #4b5563; }
+  .pmisa .cols { flex: 1; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 3.5mm; margin-top: 4mm; min-height: 0; }
+  .pmisa .misa { border: .3mm solid #d1d5db; border-radius: 3mm; overflow: hidden; display: flex; flex-direction: column; min-height: 0; page-break-inside: avoid; }
+  .pmisa .mh { padding: 2.4mm 3mm 2.2mm; background: color-mix(in srgb, var(--lc) 16%, #fff); border-top: 2.6mm solid var(--lc); }
+  .pmisa .r1 { display: flex; align-items: center; justify-content: space-between; gap: 2mm; }
+  .pmisa .slot { font-size: 8pt; font-weight: 800; color: #fff; background: #14532d; border-radius: 1.5mm; padding: .4mm 1.8mm; }
+  .pmisa .slot.khusus { background: #b45309; }
+  .pmisa .lit { font-size: 7pt; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: .4mm 2mm; border-radius: 99px; background: var(--lc); color: var(--lt); border: .2mm solid rgba(0,0,0,.15); }
+  .pmisa .day { margin-top: 1.6mm; font-size: 11pt; font-weight: 800; }
+  .pmisa .time { font-size: 9pt; color: #374151; }
+  .pmisa .title { font-size: 8.5pt; color: #1f2937; font-style: italic; margin-top: .4mm; }
+  .pmisa ol.pt { list-style: none; margin: 0; padding: 1.6mm 2.4mm 2mm; flex: 1; counter-reset: n; }
+  .pmisa ol.pt li { counter-increment: n; display: flex; align-items: center; gap: 1.8mm; font-size: 9pt; padding: .75mm 1mm; border-bottom: .2mm dotted #d1d5db; }
+  .pmisa ol.pt li::before { content: counter(n); width: 4.2mm; font-size: 7pt; color: #6b7280; text-align: right; flex: none; }
+  .pmisa ol.pt li.k { background: #dbeafe; border-radius: 1.2mm; font-weight: 800; border-bottom-color: transparent; }
+  .pmisa ol.pt li.k::before { content: "★"; color: #1d4ed8; font-size: 8pt; }
+  .pmisa ol.pt li.k small { font-weight: 600; color: #1d4ed8; font-size: 6.5pt; margin-left: auto; }
+  .pmisa ol.pt li.e span { flex: 1; border-bottom: .2mm dashed #d6a54a; height: 3mm; }
+  .pmisa.dense ol.pt li { font-size: 8pt; padding: .3mm 1mm; }
+  .pmisa .cnt { font-size: 7pt; color: #6b7280; padding: 0 3mm 2mm; }
+  .pmisa .pfoot { display: flex; justify-content: space-between; align-items: center; gap: 4mm; margin-top: 3mm; font-size: 7.5pt; color: #4b5563; }
+  .pmisa .leg { display: flex; flex-wrap: wrap; gap: 3mm; align-items: center; }
+  .pmisa .leg i { display: inline-block; width: 3mm; height: 3mm; border-radius: 50%; margin-right: 1mm; vertical-align: -.5mm; border: .2mm solid rgba(0,0,0,.2); }
+  .pmisa .leg b.kk { background: #dbeafe; padding: 0 1.5mm; border-radius: 1mm; }
+  .pmisa .leg .le { color: #b45309; }
+}
 /* Pilihan cetak jadwal misa */
 .seg { display: flex; flex-wrap: wrap; gap: 6px; }
 .seg label { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: .9rem; cursor: pointer; }
