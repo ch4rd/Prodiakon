@@ -1488,7 +1488,6 @@ function openMenu() {
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
     S.months.length && ['reports', '📑 Laporan (PDF)'],
     ['theme', `🌓 Tampilan: ${THEMES[themeNow()]}`],
-    ['guide', '📖 Panduan'],
     ONLINE && ['profile', '👤 Profil saya'],
     ONLINE && ['logout', '🚪 Keluar'],
   ].filter(Boolean);
