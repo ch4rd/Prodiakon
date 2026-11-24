@@ -2494,60 +2494,104 @@ function pdfFooter(doc) {
   }
 }
 
-// 1) Jadwal tugas prodiakon: satu tabel per jam misa, kolom per akhir pekan, koordinator biru tebal
+// 1) Jadwal tugas prodiakon (format Excel paroki): A4 tegak, satu blok per jam misa, kolom per akhir pekan,
+//    header berwarna liturgi, koordinator biru tebal di posisinya, misa khusus di blok kuning, keterangan warna
+const LIT_FILL = { '': [217, 217, 217], hijau: [146, 208, 80], putih: [255, 255, 255], merah: [255, 0, 0], ungu: [204, 153, 255], 'merah muda': [255, 153, 204] };
+const LIT_PDF_TEXT = { merah: 255 };
 async function reportJadwal(ym) {
   const jsPDF = await loadPdfLib();
   const { misa } = await reportData(ym);
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-  const W = weekendsOf(ym);
-  const GREEN = [146, 208, 80], KOOR = [184, 204, 228];
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(0);
-  doc.text('JADWAL TUGAS PRODIAKON', 10, 14);
-  doc.text(monthShort(ym), doc.internal.pageSize.getWidth() - 10, 14, { align: 'right' });
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(`Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''}`, 10, 19);
-  let y = 23;
-  for (const k of REGULAR) {
-    const cols = W.map((_, i) => misaOfWeek(misa, ym, k, i));
-    if (!cols.some(Boolean)) continue;
-    const sl = slotByKey(k);
-    const dayName = DAYS[sl.day].toUpperCase();
-    const head = [
-      ['', ...cols.map((m, i) => m ? `TGL. ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}` : `${W[i].label} - ${dayName}`)],
-      ['', ...cols.map(m => `WARNA LITURGI : ${m ? (COLORS[m.color] || COLORS[''])[0].toUpperCase() : '-'}`)],
-      ['', ...cols.map(m => (m?.title || '-').toUpperCase())],
-      ['', ...cols.map(m => `${k} - PK. ${m?.time || sl.time}`)],
-    ];
-    const n = Math.max(1, ...cols.map(m => Math.max(m?.officers.length || 0, m?.need || 0)));
-    // urutan sesuai jadwal (seperti Excel); koordinator ditandai biru tebal di posisinya
-    const lists = cols.map(m => (m ? [...m.officers] : []));
-    const body = Array.from({ length: n }, (_, r) => [String(r + 1), ...lists.map(l => l[r] || '')]);
-    doc.autoTable({
-      startY: y, head, body, theme: 'grid', margin: { left: 10, right: 10 },
-      styles: { fontSize: 8, cellPadding: 0.9, halign: 'center', lineColor: [140, 140, 140], lineWidth: 0.1, textColor: 20 },
-      headStyles: { fillColor: GREEN, textColor: 0, fontStyle: 'bold', fontSize: 8 },
-      columnStyles: { 0: { cellWidth: 8, halign: 'right', textColor: 90 } },
-      didParseCell: d => {
-        if (d.section !== 'body' || d.column.index === 0) return;
-        const m = cols[d.column.index - 1];
-        if (m && d.cell.raw && norm(d.cell.raw) === norm(m.coordinator)) { d.cell.styles.fillColor = KOOR; d.cell.styles.fontStyle = 'bold'; }
-      },
-    });
-    y = doc.lastAutoTable.finalY + 6;
-  }
-  // misa khusus / lainnya
-  const lain = misa.filter(m => m.slot === 'LAIN').sort(cmpMisa);
-  if (lain.length) {
-    doc.autoTable({
-      startY: y, theme: 'grid', margin: { left: 10, right: 10 },
-      head: [['TANGGAL', 'MISA', 'JAM', 'TEMPAT', 'KOORDINATOR', 'PETUGAS']],
-      body: lain.map(m => [fmtShort(m.date), m.title || '-', m.time || '', m.place || '', m.coordinator || '', m.officers.filter(o => norm(o) !== norm(m.coordinator)).join(', ')]),
-      styles: { fontSize: 8, cellPadding: 1, lineColor: [140, 140, 140], lineWidth: 0.1, textColor: 20 },
-      headStyles: { fillColor: GREEN, textColor: 0, fontStyle: 'bold' },
-      columnStyles: { 0: { cellWidth: 24 }, 1: { cellWidth: 45 }, 2: { cellWidth: 14 }, 3: { cellWidth: 28 }, 4: { cellWidth: 32 } },
-    });
+  // Usahakan satu bulan muat satu halaman: bila belum muat, huruf & jarak baris diperkecil
+  let doc;
+  for (const [FS, PAD, GAP] of [[7, 0.55, 3.5], [6.3, 0.4, 2.6], [5.6, 0.28, 2], [5, 0.2, 1.6]]) {
+    doc = buildJadwalPdf(jsPDF, ym, misa, FS, PAD, GAP);
+    if (doc.getNumberOfPages() === 1) break;
   }
   pdfFooter(doc);
   doc.save(`jadwal-prodiakon-${ym}.pdf`);
+}
+function buildJadwalPdf(jsPDF, ym, misa, FS, PAD, GAP) {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const PW = doc.internal.pageSize.getWidth(), M = 7, CW = PW - 2 * M;
+  const W = weekendsOf(ym);
+  const KOOR = [184, 204, 228], YELLOW = [255, 255, 102], LINE = [90, 90, 90];
+  const base = { fontSize: FS, cellPadding: PAD, halign: 'center', valign: 'middle', lineColor: LINE, lineWidth: 0.15, textColor: 20, overflow: 'ellipsize' };
+  // Judul: kotak "JADWAL TUGAS PRODIAKON" + kotak bulan
+  doc.autoTable({
+    startY: M, margin: { left: M, right: M }, theme: 'grid',
+    body: [[{ content: 'JADWAL TUGAS PRODIAKON' }, { content: monthShort(ym) }]],
+    styles: { ...base, fontSize: 11, fontStyle: 'bold', cellPadding: 1.2 },
+    columnStyles: { 1: { cellWidth: CW / 5 } },
+  });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(90);
+  doc.text(`Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''}`, M, doc.lastAutoTable.finalY + 3);
+  let y = doc.lastAutoTable.finalY + 5;
+  const litStyle = (d, m) => {
+    const c = m ? m.color || '' : '';
+    d.cell.styles.fillColor = LIT_FILL[c] || LIT_FILL[''];
+    d.cell.styles.textColor = LIT_PDF_TEXT[c] ?? 0;
+    d.cell.styles.fontStyle = 'bold';
+  };
+  for (const k of REGULAR) {
+    const cols = W.map((_, i) => misaOfWeek(misa, ym, k, i));
+    if (!cols.some(Boolean)) continue;
+    const sl = slotByKey(k), dayName = DAYS[sl.day].toUpperCase();
+    const head = [
+      cols.map((m, i) => m ? `TGL. ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}` : `${W[i].label} - ${dayName}`),
+      cols.map(m => `WARNA LITURGI : ${m ? (COLORS[m.color] || COLORS[''])[0].toUpperCase() : '-'}`),
+      cols.map(m => (m?.title || '-').toUpperCase()),
+      cols.map(m => `${k} - PK. ${m?.time || sl.time}`),
+    ];
+    // baris sebanyak petugas terbanyak yang sudah terisi (seperti Excel)
+    const n = Math.max(1, ...cols.map(m => m?.officers.length || 0));
+    const lists = cols.map(m => (m ? [...m.officers] : []));
+    const body = Array.from({ length: n }, (_, r) => lists.map(l => l[r] || ''));
+    doc.autoTable({
+      startY: y, head, body, theme: 'grid', margin: { left: M, right: M }, rowPageBreak: 'avoid',
+      styles: base, headStyles: { fontSize: FS - 0.4, cellPadding: PAD },
+      didParseCell: d => {
+        const m = cols[d.column.index];
+        if (d.section === 'head') return litStyle(d, m);
+        if (m && d.cell.raw && norm(d.cell.raw) === norm(m.coordinator)) { d.cell.styles.fillColor = KOOR; d.cell.styles.fontStyle = 'bold'; }
+      },
+    });
+    y = doc.lastAutoTable.finalY + GAP;
+  }
+  // Misa khusus: kolom kuning (maks. 5 per baris) — tanggal & hari, nama misa, tempat & jam, lalu petugas
+  const lain = misa.filter(m => m.slot === 'LAIN').sort(cmpMisa);
+  for (let i = 0; i < lain.length; i += 5) {
+    const part = lain.slice(i, i + 5);
+    const head = [
+      part.map(m => `TGL ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}`),
+      part.map(m => (m.title || 'Misa').toUpperCase()),
+      part.map(m => [m.place && m.place.toUpperCase(), m.time && `PK. ${m.time}`].filter(Boolean).join(' - ') || '-'),
+    ];
+    const n = Math.max(1, ...part.map(m => Math.max(m.officers.length, m.note ? 1 : 0)));
+    const body = Array.from({ length: n }, (_, r) => part.map(m => m.officers[r] || (!m.officers.length && r === 0 && m.note ? m.note.toUpperCase() : '')));
+    doc.autoTable({
+      startY: y, head, body, theme: 'grid', margin: { left: M, right: M + (5 - part.length) * (CW / 5) }, rowPageBreak: 'avoid',
+      styles: base, headStyles: { fillColor: YELLOW, textColor: 0, fontStyle: 'bold', fontSize: FS - 0.4, cellPadding: PAD },
+      didParseCell: d => {
+        const m = part[d.column.index];
+        if (d.section === 'body' && m && d.cell.raw && norm(d.cell.raw) === norm(m.coordinator)) { d.cell.styles.fillColor = KOOR; d.cell.styles.fontStyle = 'bold'; }
+      },
+    });
+    y = doc.lastAutoTable.finalY + GAP;
+  }
+  // Keterangan: koordinator + warna liturgi
+  const lit = Object.keys(LIT_FILL).filter(Boolean);
+  doc.autoTable({
+    startY: y, body: [['NAMA', ': KOORDINATOR']].concat(lit.map(c => [COLORS[c][0].toUpperCase(), ': WARNA LITURGI'])),
+    theme: 'plain', margin: { left: M, right: PW - M - 62 }, rowPageBreak: 'avoid',
+    styles: { fontSize: FS - 0.4, cellPadding: PAD, textColor: 0, valign: 'middle' },
+    columnStyles: { 0: { cellWidth: 26, halign: 'center', fontStyle: 'bold', lineWidth: 0.15, lineColor: LINE } },
+    didParseCell: d => {
+      if (d.column.index !== 0) return;
+      if (d.row.index === 0) d.cell.styles.fillColor = KOOR;
+      else { const c = lit[d.row.index - 1]; d.cell.styles.fillColor = LIT_FILL[c]; d.cell.styles.textColor = LIT_PDF_TEXT[c] ?? 0; }
+    },
+  });
+  return doc;
 }
 
 // 2) Daftar petugas prodiakon layanan hantaran: per jam layanan, kolom petugas tiap minggu + data umat
