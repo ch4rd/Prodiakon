@@ -944,7 +944,7 @@ function renderCek(main) {
 
 /* ================= Sheet (dialog) ================= */
 const dlg = $('#sheet');
-function openSheet(title, body, { save, del, saveLabel = 'Simpan', busyLabel = 'Menyimpan…', onClick } = {}) {
+function openSheet(title, body, { save, del, saveLabel = 'Simpan', busyLabel = 'Menyimpan…', onClick, extra } = {}) {
   const f = $('#sheetForm');
   f.innerHTML = `<div class="sh-head"><span>${h(title)}</span><button type="button" class="icon-btn" data-sh="close">✕</button></div>
     <div class="sh-body">${body}</div>
@@ -952,6 +952,7 @@ function openSheet(title, body, { save, del, saveLabel = 'Simpan', busyLabel = '
       ${del ? '<button type="button" class="btn danger" data-sh="del">Hapus</button>' : ''}
       <span class="sp"></span>
       <button type="button" class="btn" data-sh="close">Batal</button>
+      ${extra ? `<button type="button" class="btn" data-sh="${h(extra.sh)}">${h(extra.label)}</button>` : ''}
       ${save ? `<button type="submit" class="btn primary">${h(saveLabel)}</button>` : ''}
     </div>` : ''}`;
   // Validasi ditangani sendiri: di Safari iPhone pesan validasi bawaan sering tidak tampil di dalam dialog,
@@ -1559,7 +1560,9 @@ $('#importFile').addEventListener('change', async e => {
 
 /* ---- Ekspor Excel (.xlsx) berwarna, mengikuti format Excel paroki ---- */
 async function loadExcel() {
-  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
+  // cadangan jsDelivr bila cdnjs tidak terjangkau dari jaringan pengguna
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js')
+    .catch(() => loadScript('https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js'));
   return window.ExcelJS;
 }
 const XL_LIT = { '': 'FFD9D9D9', hijau: 'FF92D050', putih: 'FFFFFFFF', merah: 'FFFF0000', ungu: 'FFCC99FF', 'merah muda': 'FFFF99CC' };
@@ -1584,10 +1587,12 @@ async function saveXlsx(wb, name) {
 }
 
 // Jadwal misa: blok per jam misa (kolom = akhir pekan), header berwarna liturgi, koordinator biru; misa khusus kuning
-async function excelJadwal(ym) {
+async function excelJadwal(ym, { list = null, sub = '' } = {}) {
   const ExcelJS = await loadExcel();
-  const { misa } = await reportData(ym);
-  const W = weekendsOf(ym), N = Math.max(W.length, 5);
+  const misa = list || (await reportData(ym)).misa;
+  // kolom = akhir pekan yang punya misa rutin terpilih (semua bila satu bulan)
+  const W = weekendsOf(ym), idx = W.map((_, i) => i).filter(i => !list || REGULAR.some(k => misaOfWeek(misa, ym, k, i)));
+  const N = list ? Math.max(idx.length, 3) : Math.max(W.length, 5);
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('Jadwal Misa', { pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: .3, right: .3, top: .4, bottom: .4, header: .2, footer: .2 } } });
   ws.columns = Array.from({ length: N }, () => ({ width: 22 }));
@@ -1597,14 +1602,14 @@ async function excelJadwal(ym) {
   xlCell(ws, r, N, monthShort(ym), { bold: true, size: 14 });
   ws.getRow(r).height = 22; r++;
   ws.mergeCells(r, 1, r, N);
-  xlCell(ws, r, 1, `Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''}`, { align: 'left', size: 8 }).border = {};
+  xlCell(ws, r, 1, `${sub ? sub + ' · ' : ''}Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''}`, { align: 'left', size: 8 }).border = {};
   r += 2;
   for (const k of REGULAR) {
-    const cols = W.map((_, i) => misaOfWeek(misa, ym, k, i));
+    const cols = idx.map(i => misaOfWeek(misa, ym, k, i));
     if (!cols.some(Boolean)) continue;
     const sl = slotByKey(k), dayName = DAYS[sl.day].toUpperCase();
     const heads = [
-      (m, i) => m ? `TGL. ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}` : `${W[i].label} - ${dayName}`,
+      (m, i) => m ? `TGL. ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}` : `${W[idx[i]].label} - ${dayName}`,
       m => `WARNA LITURGI : ${m ? (COLORS[m.color] || COLORS[''])[0].toUpperCase() : '-'}`,
       m => (m?.title || '-').toUpperCase(),
       m => `${k} - PK. ${m?.time || sl.time}`,
@@ -1647,13 +1652,15 @@ async function excelJadwal(ym) {
     xlCell(ws, r, 1, COLORS[c][0].toUpperCase(), { bold: true, fill: XL_LIT[c], color: c === 'merah' ? 'FFFFFFFF' : undefined });
     xlCell(ws, r, 2, ': WARNA LITURGI', { align: 'left' }).border = {}; r++;
   }
-  await saveXlsx(wb, `jadwal-prodiakon-${ym}.xlsx`);
+  await saveXlsx(wb, `jadwal-prodiakon-${ym}${list ? '-pilihan' : ''}.xlsx`);
 }
 
 // Hantaran: seperti sheet ANTARAN paroki — No, jam, petugas tiap minggu, lalu data umat; bagian per jam layanan
-async function excelHantaran(ym) {
+async function excelHantaran(ym, { wil = '' } = {}) {
   const ExcelJS = await loadExcel();
-  const { month, smk } = await reportData(ym);
+  const { month, smk: all } = await reportData(ym);
+  const smk = wil ? all.filter(g => groupWilayah(g).some(w => w.id === wil)) : all;
+  const wilName = wil ? S.wilayah.find(w => w.id === wil)?.nama || '' : '';
   const weeksL = month?.weeks?.length ? month.weeks : weekendsOf(ym).map(w => w.label), nW = weeksL.length;
   const nCol = 2 + nW + 4;
   const wb = new ExcelJS.Workbook();
@@ -1661,7 +1668,7 @@ async function excelHantaran(ym) {
   ws.columns = [{ width: 5 }, { width: 14 }, ...weeksL.map(() => ({ width: 15 })), { width: 30 }, { width: 14 }, { width: 42 }, { width: 16 }];
   let r = 1;
   ws.mergeCells(r, 1, r, nCol);
-  xlCell(ws, r, 1, `DAFTAR PETUGAS PRODIAKON LAYANAN HANTARAN — ${monthName(ym).toUpperCase()}`, { bold: true, size: 13, fill: XL_ORANGE });
+  xlCell(ws, r, 1, `DAFTAR PETUGAS PRODIAKON LAYANAN HANTARAN — ${monthName(ym).toUpperCase()}${wilName ? ' · WIL. ' + wilName.toUpperCase() : ''}`, { bold: true, size: 13, fill: XL_ORANGE });
   ws.getRow(r).height = 20; r++;
   ws.mergeCells(r, 1, r, nCol);
   xlCell(ws, r, 1, `Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''} · data alamat & telepon umat hanya untuk petugas`, { align: 'left', size: 8 }).border = {};
@@ -1695,7 +1702,7 @@ async function excelHantaran(ym) {
     xlCell(ws, r, 1, `Catatan:\n${month.notes}`, { align: 'left', wrap: true, fill: 'FFFEF3C7' });
     ws.getRow(r).height = Math.min(400, 14 * (month.notes.split('\n').length + 1));
   }
-  await saveXlsx(wb, `hantaran-${ym}.xlsx`);
+  await saveXlsx(wb, `hantaran-${ym}${wilName ? '-' + wilName.toLowerCase().replace(/[^a-z0-9]+/g, '-') : ''}.xlsx`);
 }
 
 // Cetak hantaran: pilih semua wilayah atau satu wilayah (bawaan: filter yang dipakai di tab Hantaran)
@@ -1711,6 +1718,12 @@ function openPrintHantaran() {
     save: fd => {
       const wil = fd.get('wil') || '';
       setTimeout(() => printView(S.misa, '', { wil }), 150); // tunggu jendela pilihan tertutup
+    },
+    extra: { sh: 'ph-xl', label: '📗 Excel' },
+    onClick: b => {
+      if (b.dataset.sh !== 'ph-xl') return;
+      const wil = $('#sheetForm').elements.wil.value || '';
+      run(async () => { toast('Menyiapkan Excel…'); await excelHantaran(S.monthId, { wil }); });
     },
   });
 }
@@ -1865,6 +1878,13 @@ function openPrintMisa() {
       const { list, sub } = pick($('#sheetForm'));
       if (!list.length) throw new Error('Tidak ada misa pada pilihan ini');
       setTimeout(() => printView(list, sub), 150); // tunggu jendela pilihan tertutup
+    },
+    extra: { sh: 'pr-xl', label: '📗 Excel' },
+    onClick: b => {
+      if (b.dataset.sh !== 'pr-xl') return;
+      const { list, sub } = pick($('#sheetForm'));
+      if (!list.length) { toast('Tidak ada misa pada pilihan ini'); return; }
+      run(async () => { toast('Menyiapkan Excel…'); await excelJadwal(S.monthId, { list, sub }); });
     },
   });
   const f = $('#sheetForm');
