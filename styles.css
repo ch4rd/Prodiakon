@@ -197,7 +197,7 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
   .print-only th { background: #e5e7eb; }
   .print-only td.k { background: #dbeafe; font-weight: 700; }
   .print-only tr.sec td { background: #38bdf8; font-weight: 700; text-align: center; }
-  @page { size: A4 landscape; margin: 10mm; }
+  @page { size: A4 portrait; margin: 10mm; } /* tegak: bawaan cetak di Android & iPhone */
 }
 .chip.edit { display: inline-flex; align-items: center; gap: 4px; padding: 5px 4px 5px 10px; font-size: .95rem; }
 .chip.edit button { border: 0; background: transparent; color: var(--muted); font-size: .9rem; line-height: 1; padding: 2px 6px; border-radius: 6px; cursor: pointer; }
@@ -379,17 +379,17 @@ a.link-btn { text-decoration: none; display: inline-block; }
    (Chrome Android tidak punya pilihan "Background graphics"). */
 @media print {
   .print-only, .print-only * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .print-only .pmisa { height: 188mm; display: flex; flex-direction: column; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #111827; }
+  .print-only .pmisa { height: 275mm; display: flex; flex-direction: column; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #111827; }
   .pmisa .phead { display: flex; align-items: center; gap: 4mm; padding-bottom: 3mm; border-bottom: .6mm solid #14532d; }
   .pmisa .lg { width: 13mm; height: 13mm; border-radius: 3mm; background: #14532d; color: #facc15; display: grid; place-items: center; font-size: 8mm; font-weight: 800; flex: none; object-fit: contain; }
   .pmisa img.lg { background: #fff; }
   .pmisa .t { flex: 1; }
   .pmisa .kk2 { font-size: 8pt; letter-spacing: .1em; text-transform: uppercase; color: #14532d; font-weight: 700; }
-  .pmisa h1 { margin: .5mm 0 0; font-size: 17pt; line-height: 1.1; }
+  .pmisa h1 { margin: .5mm 0 0; font-size: 15pt; line-height: 1.1; white-space: nowrap; }
   .pmisa .rr { text-align: right; }
   .pmisa .rr .d { font-size: 12pt; font-weight: 800; }
   .pmisa .rr .m { font-size: 9pt; color: #4b5563; }
-  .pmisa .cols { flex: 1; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 3.5mm; margin-top: 4mm; min-height: 0; }
+  .pmisa .cols { flex: 1; display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 3mm; margin-top: 4mm; min-height: 0; }
   .pmisa .misa { border: .3mm solid #d1d5db; border-radius: 3mm; overflow: hidden; display: flex; flex-direction: column; min-height: 0; page-break-inside: avoid; }
   .pmisa .mh { padding: 2.4mm 3mm 2.2mm; background: color-mix(in srgb, var(--lc) 16%, #fff); border-top: 2.6mm solid var(--lc); }
   .pmisa .r1 { display: flex; align-items: center; justify-content: space-between; gap: 2mm; }
@@ -407,6 +407,9 @@ a.link-btn { text-decoration: none; display: inline-block; }
   .pmisa ol.pt li.k small { font-weight: 600; color: #1d4ed8; font-size: 6.5pt; margin-left: auto; }
   .pmisa ol.pt li.e span { flex: 1; border-bottom: .2mm dashed #d6a54a; height: 3mm; }
   .pmisa.dense ol.pt li { font-size: 8pt; padding: .3mm 1mm; }
+  .pmisa.dense2 ol.pt li { font-size: 7.2pt; padding: .05mm 1mm; }
+  .pmisa.dense2 .mh { padding: 1.4mm 2.4mm 1.2mm; }
+  .pmisa.dense2 .day { margin-top: .6mm; font-size: 10pt; }
   .pmisa .cnt { font-size: 7pt; color: #6b7280; padding: 0 3mm 2mm; }
   .pmisa .pfoot { display: flex; justify-content: space-between; align-items: center; gap: 4mm; margin-top: 3mm; font-size: 7.5pt; color: #4b5563; }
   .pmisa .leg { display: flex; flex-wrap: wrap; gap: 3mm; align-items: center; }
@@ -428,7 +431,7 @@ a.link-btn { text-decoration: none; display: inline-block; }
   .phant .rr .m { font-size: 7.5pt; color: #6b7280; }
   .phant .hsec { background: #0ea5e9; color: #fff; font-weight: 800; font-size: 9pt; border-radius: 1.5mm; padding: 1mm 2.5mm; margin: 3mm 0 2mm; break-after: avoid; }
   .phant .hsec span { font-weight: 500; opacity: .9; margin-left: 2mm; }
-  .phant .hgrid { columns: 4; column-gap: 2.5mm; }
+  .phant .hgrid { columns: 3; column-gap: 2.5mm; }
   .phant .hcard { break-inside: avoid; border: .3mm solid #d1d5db; border-radius: 2mm; margin-bottom: 3mm; overflow: hidden; font-size: 7.5pt; }
   .phant .hh { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; padding: 1.4mm 2mm 1.2mm; background: #e0f2fe; border-top: 1.6mm solid #0ea5e9; }
   .phant .hh b { font-size: 10pt; }

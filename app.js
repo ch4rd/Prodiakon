@@ -1610,7 +1610,7 @@ function printView(misaList = S.misa, subtitle = '') {
       const lc = m.color ? col[1] : '#9ca3af', koor = norm(m.coordinator);
       const empty = Math.max(0, (m.need || 0) - m.officers.length);
       const li = m.officers.map(n => (norm(n) === koor
-        ? `<li class="k">${h(n)} <small>koordinator</small></li>` : `<li>${h(n)}</li>`)).join('')
+        ? `<li class="k">${h(n)}</li>` : `<li>${h(n)}</li>`)).join('')
         + '<li class="e"><span></span></li>'.repeat(empty);
       return `<div class="misa" style="--lc:${lc};--lt:${LIT_INK[m.color] || '#111827'}">
         <div class="mh"><div class="r1"><span class="slot${m.slot === 'LAIN' ? ' khusus' : ''}">${m.slot === 'LAIN' ? 'Khusus' : h(m.slot)}</span>${m.color ? `<span class="lit">${h(col[0])}</span>` : ''}</div>
@@ -1623,7 +1623,7 @@ function printView(misaList = S.misa, subtitle = '') {
     const legend = `<div class="pfoot"><div class="leg"><span><b class="kk">★ Nama</b> koordinator</span><span class="le">- - - belum terisi</span>
       ${Object.entries(COLORS).filter(([k]) => k).map(([, c]) => `<span><i style="background:${c[1]}"></i>${h(c[0])}</span>`).join('')}</div>
       <div>Dicetak ${h(fmtShort(todayIso()))} ${new Date().getFullYear()} · Prodiakon ${h(P.nama)}</div></div>`;
-    // Satu halaman per akhir pekan (misa khusus di minggu itu ikut), maks. 5 kartu per halaman
+    // Satu halaman per akhir pekan (misa khusus di minggu itu ikut)
     const byWeek = new Map();
     for (const m of [...misaList].sort(cmpMisa)) {
       const k = weekKey(m.date);
@@ -1638,13 +1638,17 @@ function printView(misaList = S.misa, subtitle = '') {
         ? `Sabtu, ${sat.getDate()} – Minggu, ${fmtLong(sun).split(', ')[1]} ${parseD(sun).getFullYear()}`
         : first === last ? fmtLong(first) : `${fmtLong(first)} – ${fmtLong(last)}`;
       const titles = [...new Set(list.map(m => m.title).filter(Boolean))].join(' · ');
-      for (let i = 0; i < list.length; i += 5) {
-        const part = list.slice(i, i + 5);
-        const rows = Math.max(...part.map(m => Math.max(m.officers.length, m.need || 0)), 1);
-        pages.push(`<section class="pg pmisa${rows > 20 ? ' dense' : ''}">
+      // A4 tegak: maks. 4 kartu per baris, 2 baris per halaman
+      for (let i = 0; i < list.length; i += 8) {
+        const part = list.slice(i, i + 8);
+        // total baris nama di halaman (per baris kartu, ambil yang terpanjang) → makin banyak, makin rapat
+        let rows = 0;
+        for (let j = 0; j < part.length; j += 4) rows += Math.max(...part.slice(j, j + 4).map(m => Math.max(m.officers.length, m.need || 0)), 1);
+        const dense = rows > 36 ? ' dense2' : rows > 28 ? ' dense' : '';
+        pages.push(`<section class="pg pmisa${dense}">
           <div class="phead">${logo}<div class="t"><div class="kk2">Paroki ${h(P.nama)}${P.kota ? ' · ' + h(P.kota) : ''}</div><h1>Jadwal Tugas Prodiakon</h1></div>
             <div class="rr"><div class="d">${h(range)}</div><div class="m">${h(titles || subtitle || title)}</div></div></div>
-          <div class="cols" style="--n:${part.length}">${part.map(card).join('')}</div>${legend}</section>`);
+          <div class="cols" style="--n:${Math.min(part.length, 4)}">${part.map(card).join('')}</div>${legend}</section>`);
       }
     }
     html += pages.join('') || '<p>Belum ada jadwal misa.</p>';
