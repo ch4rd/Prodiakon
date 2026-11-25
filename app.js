@@ -1471,7 +1471,6 @@ function openMenu() {
     S.admin && ['new-month', '📅 Buat bulan baru'],
     S.admin && S.monthId && ['settings', '⚙️ Pengaturan bulan ini (label minggu, catatan)'],
     S.monthId && ['print', '🖨️ Cetak jadwal ' + (S.tab === 'smk' ? 'hantaran' : 'misa')],
-    S.monthId && ['csv', '📄 Export daftar hantaran (CSV/Excel)'],
     ['backup', '💾 Backup semua data (JSON)'],
     S.admin && ['import', '📥 Import dari backup JSON'],
     S.admin && hasSeedData() && !hasSeed && ['load-seed', '🧾 Muat data Oktober 2026'],
@@ -1486,7 +1485,7 @@ function openMenu() {
     S.admin && ['sponsor', `🤝 Sponsor${S.sponsor.length ? ` (${activeSponsors().length} tayang)` : ''}`],
     ONLINE && S.super && ['switch-paroki', `🔁 Ganti paroki (sekarang: ${P.nama})`],
     ONLINE && S.super && ['paroki', '🏛️ Master paroki (super admin)'],
-    S.months.length && ['reports', '📑 Laporan (PDF)'],
+    S.months.length && ['reports', '📑 Laporan & export (PDF, Excel)'],
     ['theme', `🌓 Tampilan: ${THEMES[themeNow()]}`],
     ONLINE && ['profile', '👤 Profil saya'],
     ONLINE && ['logout', '🚪 Keluar'],
@@ -1517,7 +1516,6 @@ async function menuAction(k) {
   if (k === 'new-month') openNewMonth();
   else if (k === 'settings') openMonthSettings();
   else if (k === 'print') (S.tab === 'smk' ? printView() : openPrintMisa());
-  else if (k === 'csv') exportCsv();
   else if (k === 'backup') run(backup);
   else if (k === 'import') $('#importFile').click();
   else if (k === 'load-seed') run(loadSeed);
@@ -1559,19 +1557,145 @@ $('#importFile').addEventListener('change', async e => {
   });
 });
 
-function exportCsv() {
-  const W = weeks();
-  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
-  const rows = [['No', 'Jam layanan', ...W, 'Nama umat', 'Lingkungan', 'Alamat', 'Telp']];
-  for (const s of SMK_SLOTS) {
-    for (const g of S.smk.filter(x => x.slot === s.key)) {
-      (mem(g).length ? mem(g) : [{}]).forEach((m, i) => rows.push([
-        i ? '' : g.no, i ? '' : s.label, ...W.map((_, j) => (i ? '' : g.officers[j] || '')),
-        m.nama, m.lingkungan, m.alamat, m.telp,
-      ]));
+/* ---- Ekspor Excel (.xlsx) berwarna, mengikuti format Excel paroki ---- */
+async function loadExcel() {
+  await loadScript('https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js');
+  return window.ExcelJS;
+}
+const XL_LIT = { '': 'FFD9D9D9', hijau: 'FF92D050', putih: 'FFFFFFFF', merah: 'FFFF0000', ungu: 'FFCC99FF', 'merah muda': 'FFFF99CC' };
+const XL_KOOR = 'FFB8CCE4', XL_YELLOW = 'FFFFFF66', XL_ORANGE = 'FFFFC000', XL_SKY = 'FF00B0F0';
+const xlBorder = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
+// isi sel + gaya umum (rata tengah, garis tipis)
+function xlCell(ws, r, c, v, { fill, bold, color, align = 'center', size, wrap } = {}) {
+  const cell = ws.getCell(r, c);
+  cell.value = v ?? '';
+  cell.font = { name: 'Arial', size: size || 9, bold: !!bold, ...(color ? { color: { argb: color } } : {}) };
+  cell.alignment = { horizontal: align, vertical: 'middle', wrapText: !!wrap };
+  cell.border = xlBorder;
+  if (fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: fill } };
+  return cell;
+}
+async function saveXlsx(wb, name) {
+  const buf = await wb.xlsx.writeBuffer();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+// Jadwal misa: blok per jam misa (kolom = akhir pekan), header berwarna liturgi, koordinator biru; misa khusus kuning
+async function excelJadwal(ym) {
+  const ExcelJS = await loadExcel();
+  const { misa } = await reportData(ym);
+  const W = weekendsOf(ym), N = Math.max(W.length, 5);
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Jadwal Misa', { pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: .3, right: .3, top: .4, bottom: .4, header: .2, footer: .2 } } });
+  ws.columns = Array.from({ length: N }, () => ({ width: 22 }));
+  let r = 1;
+  ws.mergeCells(r, 1, r, N - 1);
+  xlCell(ws, r, 1, 'JADWAL TUGAS PRODIAKON', { bold: true, size: 14 });
+  xlCell(ws, r, N, monthShort(ym), { bold: true, size: 14 });
+  ws.getRow(r).height = 22; r++;
+  ws.mergeCells(r, 1, r, N);
+  xlCell(ws, r, 1, `Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''}`, { align: 'left', size: 8 }).border = {};
+  r += 2;
+  for (const k of REGULAR) {
+    const cols = W.map((_, i) => misaOfWeek(misa, ym, k, i));
+    if (!cols.some(Boolean)) continue;
+    const sl = slotByKey(k), dayName = DAYS[sl.day].toUpperCase();
+    const heads = [
+      (m, i) => m ? `TGL. ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}` : `${W[i].label} - ${dayName}`,
+      m => `WARNA LITURGI : ${m ? (COLORS[m.color] || COLORS[''])[0].toUpperCase() : '-'}`,
+      m => (m?.title || '-').toUpperCase(),
+      m => `${k} - PK. ${m?.time || sl.time}`,
+    ];
+    for (const fn of heads) {
+      cols.forEach((m, i) => xlCell(ws, r, i + 1, fn(m, i), { bold: true, fill: XL_LIT[m?.color || ''] || XL_LIT[''], color: m?.color === 'merah' ? 'FFFFFFFF' : undefined }));
+      r++;
+    }
+    const n = Math.max(1, ...cols.map(m => m?.officers.length || 0));
+    for (let j = 0; j < n; j++, r++) {
+      cols.forEach((m, i) => {
+        const v = m?.officers[j] || '', isK = v && norm(v) === norm(m.coordinator);
+        xlCell(ws, r, i + 1, v, isK ? { bold: true, fill: XL_KOOR } : {});
+      });
+    }
+    r++;
+  }
+  // misa khusus / harian: 5 kolom per baris blok
+  const lain = misa.filter(m => m.slot === 'LAIN').sort(cmpMisa);
+  for (let i = 0; i < lain.length; i += N) {
+    const part = lain.slice(i, i + N);
+    const heads = [
+      m => `TGL ${parseD(m.date).getDate()} ${MON3[parseD(m.date).getMonth()].toUpperCase()} - ${DAYS[parseD(m.date).getDay()].toUpperCase()}`,
+      m => (m.title || 'Misa').toUpperCase(),
+      m => [m.place && m.place.toUpperCase(), m.time && `PK. ${m.time}`].filter(Boolean).join(' - ') || '-',
+    ];
+    for (const fn of heads) { part.forEach((m, j) => xlCell(ws, r, j + 1, fn(m), { bold: true, fill: XL_YELLOW })); r++; }
+    const n = Math.max(1, ...part.map(m => Math.max(m.officers.length, m.note ? 1 : 0)));
+    for (let j = 0; j < n; j++, r++) {
+      part.forEach((m, c) => {
+        const v = m.officers[j] || (!m.officers.length && j === 0 && m.note ? m.note.toUpperCase() : ''), isK = v && norm(v) === norm(m.coordinator);
+        xlCell(ws, r, c + 1, v, isK ? { bold: true, fill: XL_KOOR } : {});
+      });
+    }
+    r++;
+  }
+  // keterangan
+  xlCell(ws, r, 1, 'NAMA', { bold: true, fill: XL_KOOR }); xlCell(ws, r, 2, ': KOORDINATOR', { align: 'left' }).border = {}; r++;
+  for (const c of Object.keys(COLORS).filter(Boolean)) {
+    xlCell(ws, r, 1, COLORS[c][0].toUpperCase(), { bold: true, fill: XL_LIT[c], color: c === 'merah' ? 'FFFFFFFF' : undefined });
+    xlCell(ws, r, 2, ': WARNA LITURGI', { align: 'left' }).border = {}; r++;
+  }
+  await saveXlsx(wb, `jadwal-prodiakon-${ym}.xlsx`);
+}
+
+// Hantaran: seperti sheet ANTARAN paroki — No, jam, petugas tiap minggu, lalu data umat; bagian per jam layanan
+async function excelHantaran(ym) {
+  const ExcelJS = await loadExcel();
+  const { month, smk } = await reportData(ym);
+  const weeksL = month?.weeks?.length ? month.weeks : weekendsOf(ym).map(w => w.label), nW = weeksL.length;
+  const nCol = 2 + nW + 4;
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Hantaran', { pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: .3, right: .3, top: .4, bottom: .4, header: .2, footer: .2 } } });
+  ws.columns = [{ width: 5 }, { width: 14 }, ...weeksL.map(() => ({ width: 15 })), { width: 30 }, { width: 14 }, { width: 42 }, { width: 16 }];
+  let r = 1;
+  ws.mergeCells(r, 1, r, nCol);
+  xlCell(ws, r, 1, `DAFTAR PETUGAS PRODIAKON LAYANAN HANTARAN — ${monthName(ym).toUpperCase()}`, { bold: true, size: 13, fill: XL_ORANGE });
+  ws.getRow(r).height = 20; r++;
+  ws.mergeCells(r, 1, r, nCol);
+  xlCell(ws, r, 1, `Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''} · data alamat & telepon umat hanya untuk petugas`, { align: 'left', size: 8 }).border = {};
+  r++;
+  ['NO.', 'JAM LAYANAN', ...weeksL, 'NAMA UMAT', 'LINGKUNGAN', 'ALAMAT', 'TELP / HP / WA'].forEach((v, i) => xlCell(ws, r, i + 1, v, { bold: true, fill: XL_ORANGE, wrap: true }));
+  ws.getRow(r).height = 24; r++;
+  ws.views = [{ state: 'frozen', ySplit: r - 1 }];
+  for (const sl of SMK_SLOTS) {
+    const groups = smk.filter(g => g.slot === sl.key).sort((a, b) => String(a.no).localeCompare(String(b.no), 'id', { numeric: true }));
+    if (!groups.length) continue;
+    ws.mergeCells(r, 1, r, nCol);
+    xlCell(ws, r, 1, sl.label.toUpperCase(), { bold: true, fill: XL_SKY }); r++;
+    const jam = REGULAR.includes(sl.key) ? `${DAYS[slotByKey(sl.key).day].toUpperCase()} ${slotByKey(sl.key).time}` : sl.label;
+    for (const g of groups) {
+      const ms = mem(g).length ? mem(g) : [{}], r0 = r;
+      ms.forEach((m, i) => {
+        xlCell(ws, r, 1, i ? '' : g.no); xlCell(ws, r, 2, i ? '' : jam);
+        weeksL.forEach((_, j) => xlCell(ws, r, 3 + j, i ? '' : g.officers[j] || '', i || g.officers[j] ? {} : { fill: 'FFFFF7ED' }));
+        xlCell(ws, r, 3 + nW, m.nama || '', { align: 'left', bold: true });
+        xlCell(ws, r, 4 + nW, m.lingkungan || '');
+        xlCell(ws, r, 5 + nW, m.alamat || '', { align: 'left', wrap: true });
+        xlCell(ws, r, 6 + nW, m.telp || '');
+        r++;
+      });
+      if (ms.length > 1) for (let c = 1; c <= 2 + nW; c++) ws.mergeCells(r0, c, r - 1, c);
     }
   }
-  download(`smk-${S.monthId}.csv`, '﻿' + rows.map(r => r.map(esc).join(';')).join('\r\n'), 'text/csv');
+  if (month?.notes) {
+    r++;
+    ws.mergeCells(r, 1, r, nCol);
+    xlCell(ws, r, 1, `Catatan:\n${month.notes}`, { align: 'left', wrap: true, fill: 'FFFEF3C7' });
+    ws.getRow(r).height = Math.min(400, 14 * (month.notes.split('\n').length + 1));
+  }
+  await saveXlsx(wb, `hantaran-${ym}.xlsx`);
 }
 
 function printView(misaList = S.misa, subtitle = '') {
@@ -2817,13 +2941,20 @@ function openReports() {
       <button type="button" data-sh="rp-hantaran">🕊️ Daftar petugas layanan hantaran (dengan alamat umat)</button>
       ${S.admin ? '<button type="button" data-sh="rp-hadir">✅ Rekap kehadiran petugas (per misa & per petugas)</button>' : ''}
     </div>
-    <p class="hint">PDF A4 landscape, siap cetak atau dikirim. Laporan hantaran memuat alamat & nomor umat — bagikan hanya ke petugas.</p>`;
-  openSheet('Laporan (PDF)', body, {
+    <div class="menu-sec">Export Excel (bisa diubah lagi)</div>
+    <div class="menu-list">
+      <button type="button" data-sh="xl-jadwal">📗 Jadwal tugas misa (Excel, berwarna)</button>
+      <button type="button" data-sh="xl-hantaran">📗 Daftar hantaran (Excel, dengan alamat umat)</button>
+    </div>
+    <p class="hint">PDF siap cetak atau dikirim; Excel untuk diolah lagi. Data hantaran memuat alamat & nomor umat — bagikan hanya ke petugas.</p>`;
+  openSheet('Laporan & export', body, {
     onClick: b => {
       const ym = $('#sheetForm').elements.ym.value;
       if (b.dataset.sh === 'rp-jadwal') run(async () => { toast('Menyiapkan PDF…'); await reportJadwal(ym); });
       else if (b.dataset.sh === 'rp-hantaran') run(async () => { toast('Menyiapkan PDF…'); await reportHantaran(ym); });
       else if (b.dataset.sh === 'rp-hadir' && S.admin) run(async () => { toast('Menyiapkan PDF…'); await reportKehadiran(ym); });
+      else if (b.dataset.sh === 'xl-jadwal') run(async () => { toast('Menyiapkan Excel…'); await excelJadwal(ym); });
+      else if (b.dataset.sh === 'xl-hantaran') run(async () => { toast('Menyiapkan Excel…'); await excelHantaran(ym); });
     },
   });
 }
