@@ -1646,6 +1646,13 @@ function printView(misaList = S.misa, subtitle = '') {
     html += pages.join('') || '<p>Belum ada jadwal misa.</p>';
     p.innerHTML = html;
   }
+  // HP mode gelap: Chrome Android menggelapkan hasil cetak → paksa terang selama mencetak
+  const root = document.documentElement, prevTheme = root.dataset.theme;
+  root.dataset.theme = 'light'; root.style.colorScheme = 'only light';
+  addEventListener('afterprint', () => {
+    root.style.colorScheme = '';
+    if (prevTheme) root.dataset.theme = prevTheme; else delete root.dataset.theme;
+  }, { once: true });
   setTimeout(() => window.print(), 50);
 }
 

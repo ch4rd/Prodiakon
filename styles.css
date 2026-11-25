@@ -187,6 +187,8 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 /* Print */
 .print-only { display: none; }
 @media print {
+  :root { color-scheme: only light; }
+  html, body { background: #fff !important; color: #000 !important; }
   body > *:not(#print) { display: none !important; }
   .print-only { display: block; font-size: 9pt; color: #000; }
   .print-only h2 { font-size: 12pt; margin: 0 0 6px; }
