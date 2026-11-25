@@ -1579,23 +1579,27 @@ function printView(misaList = S.misa, subtitle = '') {
   const title = monthName(S.monthId);
   if (S.tab === 'smk') {
     const W = weeks();
-    let rows = '';
+    const logo = P.logo ? `<img class="lg" src="${h(P.logo)}" alt="">` : '<div class="lg">✝</div>';
+    let sec = '';
     for (const s of SMK_SLOTS) {
-      const gs = S.smk.filter(x => x.slot === s.key);
+      const gs = S.smk.filter(x => x.slot === s.key).sort((a, b) => String(a.no).localeCompare(String(b.no), 'id', { numeric: true }));
       if (!gs.length) continue;
-      rows += `<tr class="sec"><td colspan="${6 + W.length}">${h(s.label.toUpperCase())}</td></tr>`;
+      const fixed = !REGULAR.includes(s.key);
+      sec += `<div class="hsec">${h(s.label)} <span>${gs.length} grup · ${gs.reduce((t, g) => t + mem(g).length, 0)} umat</span></div><div class="hgrid">`;
       for (const g of gs) {
-        const ms = mem(g).length ? mem(g) : [{}];
-        ms.forEach((m, i) => {
-          rows += `<tr>${i ? '' : `<td rowspan="${ms.length}">${h(g.no)}</td>${W.map((_, j) => `<td rowspan="${ms.length}">${h(g.officers[j] || '')}</td>`).join('')}`}
-            <td>${h(m.nama)}</td><td>${h(m.lingkungan)}</td><td>${h(m.alamat)}</td><td>${h(m.telp)}</td></tr>`;
-        });
+        const wil = groupWilayah(g).map(w => w.nama).join(', ');
+        const pet = fixed
+          ? `<div class="hfix">Petugas tetap: <b>${h(g.officers.find(Boolean) || '-')}</b></div>`
+          : `<div class="hwk" style="--n:${W.length}">${W.map((w, j) => `<div class="${g.officers[j] ? '' : 'e'}"><small>${h(w)}</small><b>${h(g.officers[j] || 'kosong')}</b></div>`).join('')}</div>`;
+        const um = mem(g).map(m => `<div class="hum"><b>${h(m.nama || '-')}</b>${m.lingkungan ? ` <i>${h(m.lingkungan)}</i>` : ''}
+          <div>${h(m.alamat || '-')}</div>${m.telp ? `<div class="tel">Telp/WA: ${h(m.telp)}</div>` : ''}</div>`).join('') || '<div class="hum"><i>Belum ada umat</i></div>';
+        sec += `<div class="hcard"><div class="hh"><b>Grup ${h(g.no)}</b><span>${wil ? 'Wil. ' + h(wil) : ''}</span></div>${pet}${um}</div>`;
       }
+      sec += '</div>';
     }
-    p.innerHTML = `<h2>DAFTAR PETUGAS PRODIAKON LAYANAN HANTARAN – ${h(title.toUpperCase())}</h2>
-      <table><thead><tr><th>No</th>${W.map(w => `<th>${h(w)}</th>`).join('')}<th>Nama</th><th>Lingkungan</th><th>Alamat</th><th>Telp/HP/WA</th></tr></thead>
-      <tbody>${rows}</tbody></table>
-      ${curMonth().notes ? `<p style="white-space:pre-wrap"><b>Catatan:</b>\n${h(curMonth().notes)}</p>` : ''}`;
+    p.innerHTML = `<section class="phant"><div class="phead">${logo}<div class="t"><div class="kk2">Paroki ${h(P.nama)}${P.kota ? ' · ' + h(P.kota) : ''}</div><h1>Layanan Hantaran</h1></div>
+        <div class="rr"><div class="d">${h(title)}</div><div class="m">Alamat & telepon umat — hanya untuk petugas</div></div></div>
+      ${sec}${curMonth().notes ? `<div class="hnote"><b>Catatan</b><div>${h(curMonth().notes)}</div></div>` : ''}</section>`;
   } else {
     let html = '';
     const LIT_INK = { ungu: '#fff', merah: '#fff' };
@@ -2610,44 +2614,110 @@ function buildJadwalPdf(jsPDF, ym, misa, FS, force) {
   return doc;
 }
 
-// 2) Daftar petugas prodiakon layanan hantaran: per jam layanan, kolom petugas tiap minggu + data umat
+// 2) Daftar petugas prodiakon layanan hantaran: A4 mendatar, per jam layanan; tiap grup berupa kartu
+//    (petugas tiap minggu + umat dengan alamat & telepon), disusun 3 kolom.
 async function reportHantaran(ym) {
   const jsPDF = await loadPdfLib();
   const { month, smk } = await reportData(ym);
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight(), M = 8, BOTTOM = PH - 11;
   const weeksL = month?.weeks?.length ? month.weeks : weekendsOf(ym).map(w => w.label);
-  const ORANGE = [255, 192, 0], BLUE = [0, 176, 240];
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(0);
-  doc.text('DAFTAR PETUGAS PRODIAKON LAYANAN HANTARAN', 10, 13);
-  doc.setFontSize(10); doc.text(`BULAN  ${monthName(ym).toUpperCase()}`, 10, 18);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.text(`Paroki ${P.nama}${P.kota ? ' – ' + P.kota : ''}`, doc.internal.pageSize.getWidth() - 10, 13, { align: 'right' });
-  const nW = weeksL.length, nCol = 2 + nW + 4;
-  const head = [
-    [{ content: 'NO.', rowSpan: 2 }, 'JAM', { content: 'TANGGAL', colSpan: nW }, { content: 'DAFTAR UMAT LAYANAN HANTARAN', colSpan: 4 }],
-    ['LAYANAN', ...weeksL, 'NAMA', 'LINGKUNGAN', 'ALAMAT', 'TELP / HP / WA'],
-  ];
-  const body = [];
-  for (const sl of SMK_SLOTS) {
-    const groups = smk.filter(g => g.slot === sl.key);
-    if (!groups.length) continue;
-    body.push([{ content: sl.label.toUpperCase(), colSpan: nCol, styles: { fillColor: BLUE, fontStyle: 'bold', halign: 'center', textColor: 0 } }]);
-    for (const g of groups) {
-      const ms = mem(g).length ? mem(g) : [{}];
-      const jam = REGULAR.includes(g.slot) ? `${DAYS[slotByKey(g.slot).day].toUpperCase()} ${slotByKey(g.slot).time}` : sl.label;
-      ms.forEach((m, i) => body.push([
-        i ? '' : String(g.no), i ? '' : jam, ...weeksL.map((_, j) => (i ? '' : g.officers[j] || '')),
-        m.nama || '', m.lingkungan || '', m.alamat || '', m.telp || '',
-      ]));
+  const FS = 6.6, LH = FS * 0.3528 * 1.28, BRAND = [20, 83, 45], SKY = [14, 165, 233], NCOL = 4, CG = 2.5;
+  const CW = (PW - 2 * M - CG * (NCOL - 1)) / NCOL;
+  const pageHead = () => {
+    doc.setFillColor(...BRAND); doc.roundedRect(M, M, 11, 11, 2, 2, 'F');
+    doc.setTextColor(250, 204, 21); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text('+', M + 5.5, M + 7.6, { align: 'center' });
+    doc.setTextColor(...BRAND); doc.setFontSize(7.5); doc.text(`PAROKI ${P.nama.toUpperCase()}${P.kota ? ' · ' + P.kota.toUpperCase() : ''}`, M + 14, M + 3.6);
+    doc.setTextColor(17, 24, 39); doc.setFontSize(15); doc.text('Layanan Hantaran', M + 14, M + 9.6);
+    doc.setFontSize(13); doc.text(monthName(ym), PW - M, M + 6, { align: 'right' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(107, 114, 128);
+    doc.text('Data alamat & telepon umat — hanya untuk petugas', PW - M, M + 10.6, { align: 'right' });
+    doc.setDrawColor(...BRAND); doc.setLineWidth(.5); doc.line(M, M + 13, PW - M, M + 13);
+    return M + 16;
+  };
+  let top = pageHead();
+  // Tinggi kartu: header + baris petugas + umat (nama, alamat terpotong ke lebar kartu, telepon)
+  const fixedOf = g => !REGULAR.includes(g.slot);
+  const umatLines = m => doc.splitTextToSize(m.alamat || '-', CW - 4).slice(0, 2);
+  const cardH = g => {
+    doc.setFontSize(FS - 0.5);
+    const ms = mem(g);
+    const umat = ms.reduce((t, m) => t + LH * (1 + umatLines(m).length + (m.telp ? 1 : 0)) + 1, 0);
+    return 7 + (fixedOf(g) ? LH + 2.5 : LH * 2 + 3) + Math.max(umat, LH) + 2;
+  };
+  const drawCard = (g, x, y, h, label) => {
+    doc.setDrawColor(209, 213, 219); doc.setLineWidth(.25); doc.setFillColor(255, 255, 255); doc.roundedRect(x, y, CW, h, 1.6, 1.6, 'FD');
+    doc.setFillColor(224, 242, 254); doc.rect(x + .15, y + 1.3, CW - .3, 5.7, 'F');
+    doc.setFillColor(...SKY); doc.roundedRect(x, y, CW, 1.6, .8, .8, 'F'); doc.rect(x, y + .8, CW, .8, 'F');
+    doc.setTextColor(17, 24, 39); doc.setFont('helvetica', 'bold'); doc.setFontSize(FS + 1.4);
+    doc.text(`Grup ${g.no}`, x + 1.8, y + 5.4);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(FS - 0.4); doc.setTextColor(55, 65, 81);
+    const wil = groupWilayah(g).map(w => w.nama).join(', ');
+    doc.text(doc.splitTextToSize([label, wil && 'Wil. ' + wil].filter(Boolean).join(' · '), CW - 18)[0], x + CW - 1.8, y + 5.3, { align: 'right' });
+    let cy = y + 7.6;
+    // petugas: tetap (privat/Jumat) satu baris, rutin per minggu dalam kotak-kotak kecil
+    if (fixedOf(g)) {
+      doc.setFontSize(FS); doc.setFont('helvetica', 'normal'); doc.setTextColor(107, 114, 128); doc.text('Petugas tetap:', x + 1.8, cy + LH * .8);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(17, 24, 39); doc.text(g.officers.find(Boolean) || '-', x + 19, cy + LH * .8);
+      cy += LH + 2.5;
+    } else {
+      const bw = (CW - 3.6 - (weeksL.length - 1)) / weeksL.length;
+      weeksL.forEach((w, j) => {
+        const bx = x + 1.8 + j * (bw + 1), n = g.officers[j] || '';
+        doc.setFillColor(...(n ? [243, 244, 246] : [255, 247, 237])); doc.roundedRect(bx, cy, bw, LH * 2 + 1, .8, .8, 'F');
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(FS - 1.6); doc.setTextColor(107, 114, 128);
+        doc.text(doc.splitTextToSize(w, bw - 1)[0], bx + bw / 2, cy + LH * .8, { align: 'center' });
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(FS - 0.6); doc.setTextColor(...(n ? [17, 24, 39] : [180, 83, 9]));
+        doc.text(doc.splitTextToSize(n || 'kosong', bw - 1)[0], bx + bw / 2, cy + LH * 1.75, { align: 'center' });
+      });
+      cy += LH * 2 + 3;
     }
+    doc.setDrawColor(229, 231, 235); doc.line(x + 1.8, cy - 1, x + CW - 1.8, cy - 1);
+    const ms = mem(g);
+    if (!ms.length) { doc.setFont('helvetica', 'italic'); doc.setFontSize(FS - 0.5); doc.setTextColor(156, 163, 175); doc.text('Belum ada umat', x + 1.8, cy + LH * .8); }
+    for (const m of ms) {
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(FS); doc.setTextColor(17, 24, 39);
+      const nm = doc.splitTextToSize(m.nama || '-', CW - 24)[0], nw = doc.getTextWidth(nm); doc.text(nm, x + 1.8, cy + LH * .8);
+      if (m.lingkungan) { doc.setFont('helvetica', 'bold'); doc.setFontSize(FS - 1); doc.setTextColor(31, 122, 68); doc.text(m.lingkungan, x + 2.8 + nw, cy + LH * .8); }
+      cy += LH;
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(FS - 0.5); doc.setTextColor(75, 85, 99);
+      for (const ln of umatLines(m)) { doc.text(ln, x + 1.8, cy + LH * .8); cy += LH; }
+      if (m.telp) { doc.setTextColor(17, 24, 39); doc.text(`Telp/WA: ${m.telp}`, x + 1.8, cy + LH * .8); cy += LH; }
+      cy += 1;
+    }
+  };
+  for (const sl of SMK_SLOTS) {
+    const groups = smk.filter(g => g.slot === sl.key).sort((a, b) => String(a.no).localeCompare(String(b.no), 'id', { numeric: true }));
+    if (!groups.length) continue;
+    const label = REGULAR.includes(sl.key) ? `${DAYS[slotByKey(sl.key).day]} ${slotByKey(sl.key).time}` : sl.label;
+    const secHead = more => {
+      doc.setFillColor(...SKY); doc.roundedRect(M, top, PW - 2 * M, 5.2, 1, 1, 'F');
+      doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5);
+      doc.text(`${sl.label.toUpperCase()}${more ? ' (lanjutan)' : ''}  ·  ${groups.length} grup · ${groups.reduce((t, g) => t + mem(g).length, 0)} umat`, M + 2, top + 3.7);
+      top += 7;
+    };
+    // judul bagian selalu bersama kartu pertamanya
+    if (top + 7 + cardH(groups[0]) > BOTTOM) { doc.addPage(); top = pageHead(); }
+    secHead(false);
+    // susun kartu ke kolom yang paling pendek
+    let colY = Array(NCOL).fill(top);
+    for (const g of groups) {
+      const hh = cardH(g);
+      let c = colY.indexOf(Math.min(...colY));
+      if (colY[c] + hh > BOTTOM) { doc.addPage(); top = pageHead(); secHead(true); colY = Array(NCOL).fill(top); c = 0; }
+      drawCard(g, M + c * (CW + CG), colY[c], hh, label);
+      colY[c] += hh + CG;
+    }
+    top = Math.max(...colY) + 1;
   }
-  doc.autoTable({
-    startY: 22, head, body, theme: 'grid', margin: { left: 8, right: 8 },
-    styles: { fontSize: 7, cellPadding: 0.8, lineColor: [150, 150, 150], lineWidth: 0.1, textColor: 20, valign: 'middle' },
-    headStyles: { fillColor: ORANGE, textColor: 0, fontStyle: 'bold', halign: 'center' },
-    columnStyles: Object.assign({ 0: { cellWidth: 8, halign: 'center' }, 1: { cellWidth: 20, halign: 'center' } },
-      Object.fromEntries(weeksL.map((_, j) => [2 + j, { cellWidth: 21, halign: 'center' }])),
-      { [2 + nW]: { cellWidth: 42 }, [3 + nW]: { cellWidth: 20, halign: 'center' }, [5 + nW]: { cellWidth: 30 } }),
-  });
+  if (month?.notes) {
+    doc.setFontSize(7.5); const lines = doc.splitTextToSize(month.notes, PW - 2 * M - 4);
+    const hh = lines.length * 3.4 + 7;
+    if (top + hh > BOTTOM) { doc.addPage(); top = pageHead(); }
+    doc.setFillColor(254, 243, 199); doc.roundedRect(M, top, PW - 2 * M, hh, 1.5, 1.5, 'F');
+    doc.setTextColor(17, 24, 39); doc.setFont('helvetica', 'bold'); doc.text('Catatan', M + 2, top + 4);
+    doc.setFont('helvetica', 'normal'); doc.text(lines, M + 2, top + 7.6);
+  }
   pdfFooter(doc);
   doc.save(`hantaran-${ym}.pdf`);
 }

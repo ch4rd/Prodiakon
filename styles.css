@@ -414,6 +414,38 @@ a.link-btn { text-decoration: none; display: inline-block; }
   .pmisa .leg b.kk { background: #dbeafe; padding: 0 1.5mm; border-radius: 1mm; }
   .pmisa .leg .le { color: #b45309; }
 }
+/* Cetak hantaran: kartu per grup, 3 kolom */
+@media print {
+  .print-only .phant { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #111827; }
+  .phant .phead { display: flex; align-items: center; gap: 4mm; padding-bottom: 3mm; border-bottom: .6mm solid #14532d; margin-bottom: 3mm; }
+  .phant .lg { width: 13mm; height: 13mm; border-radius: 3mm; background: #14532d; color: #facc15; display: grid; place-items: center; font-size: 8mm; font-weight: 800; flex: none; object-fit: contain; }
+  .phant img.lg { background: #fff; }
+  .phant .t { flex: 1; }
+  .phant .kk2 { font-size: 8pt; letter-spacing: .1em; text-transform: uppercase; color: #14532d; font-weight: 700; }
+  .phant h1 { margin: .5mm 0 0; font-size: 17pt; line-height: 1.1; }
+  .phant .rr { text-align: right; }
+  .phant .rr .d { font-size: 13pt; font-weight: 800; }
+  .phant .rr .m { font-size: 7.5pt; color: #6b7280; }
+  .phant .hsec { background: #0ea5e9; color: #fff; font-weight: 800; font-size: 9pt; border-radius: 1.5mm; padding: 1mm 2.5mm; margin: 3mm 0 2mm; break-after: avoid; }
+  .phant .hsec span { font-weight: 500; opacity: .9; margin-left: 2mm; }
+  .phant .hgrid { columns: 4; column-gap: 2.5mm; }
+  .phant .hcard { break-inside: avoid; border: .3mm solid #d1d5db; border-radius: 2mm; margin-bottom: 3mm; overflow: hidden; font-size: 7.5pt; }
+  .phant .hh { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; padding: 1.4mm 2mm 1.2mm; background: #e0f2fe; border-top: 1.6mm solid #0ea5e9; }
+  .phant .hh b { font-size: 10pt; }
+  .phant .hh span { color: #374151; font-size: 7pt; }
+  .phant .hwk { display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 1mm; padding: 1.5mm 2mm; }
+  .phant .hwk div { background: #f3f4f6; border-radius: 1mm; text-align: center; padding: .6mm .3mm; overflow: hidden; }
+  .phant .hwk div.e { background: #fff7ed; color: #b45309; }
+  .phant .hwk small { display: block; font-size: 5.8pt; color: #6b7280; white-space: nowrap; }
+  .phant .hwk b { display: block; font-size: 7pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phant .hfix { padding: 1.5mm 2mm; color: #6b7280; }
+  .phant .hfix b { color: #111827; }
+  .phant .hum { padding: 1mm 2mm 1.2mm; border-top: .2mm solid #e5e7eb; color: #4b5563; }
+  .phant .hum b { color: #111827; }
+  .phant .hum i { font-style: normal; font-weight: 700; color: #1f7a44; font-size: 6.5pt; }
+  .phant .hum .tel { color: #111827; }
+  .phant .hnote { background: #fef3c7; border-radius: 1.5mm; padding: 2mm 3mm; font-size: 8pt; white-space: pre-wrap; break-inside: avoid; }
+}
 /* Pilihan cetak jadwal misa */
 .seg { display: flex; flex-wrap: wrap; gap: 6px; }
 .seg label { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); font-size: .9rem; cursor: pointer; }
