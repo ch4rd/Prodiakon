@@ -1515,7 +1515,7 @@ async function menuAction(k) {
   if (k === 'paroki') return S.super && run(openMasterParoki);
   if (k === 'new-month') openNewMonth();
   else if (k === 'settings') openMonthSettings();
-  else if (k === 'print') (S.tab === 'smk' ? printView() : openPrintMisa());
+  else if (k === 'print') (S.tab === 'smk' ? openPrintHantaran() : openPrintMisa());
   else if (k === 'backup') run(backup);
   else if (k === 'import') $('#importFile').click();
   else if (k === 'load-seed') run(loadSeed);
@@ -1698,7 +1698,24 @@ async function excelHantaran(ym) {
   await saveXlsx(wb, `hantaran-${ym}.xlsx`);
 }
 
-function printView(misaList = S.misa, subtitle = '') {
+// Cetak hantaran: pilih semua wilayah atau satu wilayah (bawaan: filter yang dipakai di tab Hantaran)
+function openPrintHantaran() {
+  if (!S.smk.length) { toast('Belum ada grup hantaran bulan ini'); return; }
+  const count = wid => S.smk.filter(g => !wid || groupWilayah(g).some(w => w.id === wid)).length;
+  const body = `
+    <label class="fld">Wilayah<select name="wil">${opt('', `Semua wilayah (${count('')} grup)`, S.smkWil || '')}
+      ${sortedWilayah().filter(w => count(w.id)).map(w => opt(w.id, `${w.nama} (${count(w.id)} grup)`, S.smkWil || '')).join('')}</select></label>
+    <p class="hint">Grup dengan umat dari beberapa wilayah ikut tercetak di setiap wilayah tersebut. Pilih kertas A4.</p>`;
+  openSheet('Cetak daftar hantaran', body, {
+    saveLabel: '🖨️ Cetak',
+    save: fd => {
+      const wil = fd.get('wil') || '';
+      setTimeout(() => printView(S.misa, '', { wil }), 150); // tunggu jendela pilihan tertutup
+    },
+  });
+}
+
+function printView(misaList = S.misa, subtitle = '', { wil = '' } = {}) {
   const p = $('#print');
   const title = monthName(S.monthId);
   if (S.tab === 'smk') {
@@ -1706,7 +1723,8 @@ function printView(misaList = S.misa, subtitle = '') {
     const logo = P.logo ? `<img class="lg" src="${h(P.logo)}" alt="">` : '<div class="lg">✝</div>';
     let sec = '';
     for (const s of SMK_SLOTS) {
-      const gs = S.smk.filter(x => x.slot === s.key).sort((a, b) => String(a.no).localeCompare(String(b.no), 'id', { numeric: true }));
+      const gs = S.smk.filter(x => x.slot === s.key && (!wil || groupWilayah(x).some(w => w.id === wil)))
+        .sort((a, b) => String(a.no).localeCompare(String(b.no), 'id', { numeric: true }));
       if (!gs.length) continue;
       const fixed = !REGULAR.includes(s.key);
       sec += `<div class="hsec">${h(s.label)} <span>${gs.length} grup · ${gs.reduce((t, g) => t + mem(g).length, 0)} umat</span></div><div class="hgrid">`;
@@ -1722,7 +1740,7 @@ function printView(misaList = S.misa, subtitle = '') {
       sec += '</div>';
     }
     p.innerHTML = `<section class="phant"><div class="phead">${logo}<div class="t"><div class="kk2">Paroki ${h(P.nama)}${P.kota ? ' · ' + h(P.kota) : ''}</div><h1>Layanan Hantaran</h1></div>
-        <div class="rr"><div class="d">${h(title)}</div><div class="m">Alamat & telepon umat — hanya untuk petugas</div></div></div>
+        <div class="rr"><div class="d">${h(title)}${wil ? ` · Wil. ${h(S.wilayah.find(w => w.id === wil)?.nama || '')}` : ''}</div><div class="m">Alamat & telepon umat — hanya untuk petugas</div></div></div>
       ${sec}${curMonth().notes ? `<div class="hnote"><b>Catatan</b><div>${h(curMonth().notes)}</div></div>` : ''}</section>`;
   } else {
     let html = '';
