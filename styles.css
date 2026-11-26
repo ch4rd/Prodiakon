@@ -431,8 +431,8 @@ a.link-btn { text-decoration: none; display: inline-block; }
   .phant .rr .m { font-size: 7.5pt; color: #6b7280; }
   .phant .hsec { background: #0ea5e9; color: #fff; font-weight: 800; font-size: 9pt; border-radius: 1.5mm; padding: 1mm 2.5mm; margin: 3mm 0 2mm; break-after: avoid; }
   .phant .hsec span { font-weight: 500; opacity: .9; margin-left: 2mm; }
-  .phant .hgrid { columns: 3; column-gap: 2.5mm; }
-  .phant .hcard { break-inside: avoid; border: .3mm solid #d1d5db; border-radius: 2mm; margin-bottom: 3mm; overflow: hidden; font-size: 7.5pt; }
+  .phant .hgrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2.5mm; align-items: stretch; } /* urut kiri → kanan */
+  .phant .hcard { break-inside: avoid; border: .3mm solid #d1d5db; border-radius: 2mm; margin-bottom: 0; overflow: hidden; font-size: 7.5pt; }
   .phant .hh { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; padding: 1.4mm 2mm 1.2mm; background: #e0f2fe; border-top: 1.6mm solid #0ea5e9; }
   .phant .hh b { font-size: 10pt; }
   .phant .hh span { color: #374151; font-size: 7pt; }

@@ -2676,20 +2676,42 @@ function pdfFooter(doc) {
 //    nama petugas dua kolom, koordinator berlatar biru tebal. Misa khusus/harian sebagai kartu kuning di bawah.
 const LIT_RGB = { '': [156, 163, 175], hijau: [34, 197, 94], putih: [203, 213, 225], merah: [239, 68, 68], ungu: [168, 85, 247], 'merah muda': [244, 114, 182], kuning: [250, 204, 21] };
 const tint = (c, k) => c.map(v => Math.round(v + (255 - v) * k));
+// Logo paroki untuk PDF: jsPDF tidak bisa WebP → digambar ulang ke PNG lewat canvas
+async function logoPng() {
+  if (!P.logo) return null;
+  try {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = P.logo; });
+    const c = document.createElement('canvas'), k = Math.min(1, 256 / Math.max(img.naturalWidth, img.naturalHeight));
+    c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    return { src: c.toDataURL('image/png'), ratio: c.width / c.height };
+  } catch { return null; }
+}
+// Kotak logo 11 mm di kepala PDF: logo paroki (bila ada) atau tanda salib di kotak hijau
+function pdfLogo(doc, logo, x, y) {
+  if (logo) {
+    const w = logo.ratio >= 1 ? 11 : 11 * logo.ratio, hh = logo.ratio >= 1 ? 11 / logo.ratio : 11;
+    doc.addImage(logo.src, 'PNG', x + (11 - w) / 2, y + (11 - hh) / 2, w, hh);
+    return;
+  }
+  doc.setFillColor(20, 83, 45); doc.roundedRect(x, y, 11, 11, 2, 2, 'F');
+  doc.setTextColor(250, 204, 21); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text('+', x + 5.5, y + 7.6, { align: 'center' });
+}
 async function reportJadwal(ym) {
   const jsPDF = await loadPdfLib();
   const { misa } = await reportData(ym);
+  const logo = await logoPng();
   // Huruf diperkecil bertahap sampai sebulan muat satu halaman
   let doc;
   for (const FS of [7.5, 7, 6.5, 6, 5.5, 5]) {
-    doc = buildJadwalPdf(jsPDF, ym, misa, FS, FS === 5);
+    doc = buildJadwalPdf(jsPDF, ym, misa, FS, FS === 5, logo);
     if (doc) break;
   }
   pdfFooter(doc);
   doc.save(`jadwal-prodiakon-${ym}.pdf`);
 }
 // Mengembalikan null bila tidak muat satu halaman (kecuali force: lanjut ke halaman berikut)
-function buildJadwalPdf(jsPDF, ym, misa, FS, force) {
+function buildJadwalPdf(jsPDF, ym, misa, FS, force, logo) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight(), M = 8, BOTTOM = PH - 11;
   const LH = FS * 0.3528 * 1.32, GAP = 2.4, BRAND = [20, 83, 45], KOOR = [219, 234, 254], KOOR_INK = [29, 78, 216];
@@ -2701,8 +2723,8 @@ function buildJadwalPdf(jsPDF, ym, misa, FS, force) {
     doc.addPage(); y = M; return true;
   };
   // Kepala halaman
-  doc.setFillColor(...BRAND); doc.roundedRect(M, y, 11, 11, 2, 2, 'F');
-  doc.setTextColor(250, 204, 21); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text('+', M + 5.5, y + 7.6, { align: 'center' });
+  pdfLogo(doc, logo, M, y);
+  doc.setFont('helvetica', 'bold');
   doc.setTextColor(20, 83, 45); doc.setFontSize(7.5); doc.text(`PAROKI ${P.nama.toUpperCase()}${P.kota ? ' · ' + P.kota.toUpperCase() : ''}`, M + 14, y + 3.6);
   doc.setTextColor(17, 24, 39); doc.setFontSize(15); doc.text('Jadwal Tugas Prodiakon', M + 14, y + 9.6);
   doc.setFontSize(13); doc.text(monthName(ym), PW - M, y + 6, { align: 'right' });
@@ -2785,14 +2807,15 @@ function buildJadwalPdf(jsPDF, ym, misa, FS, force) {
 async function reportHantaran(ym) {
   const jsPDF = await loadPdfLib();
   const { month, smk } = await reportData(ym);
+  const logo = await logoPng();
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight(), M = 8, BOTTOM = PH - 11;
   const weeksL = month?.weeks?.length ? month.weeks : weekendsOf(ym).map(w => w.label);
   const FS = 6.6, LH = FS * 0.3528 * 1.28, BRAND = [20, 83, 45], SKY = [14, 165, 233], NCOL = 4, CG = 2.5;
   const CW = (PW - 2 * M - CG * (NCOL - 1)) / NCOL;
   const pageHead = () => {
-    doc.setFillColor(...BRAND); doc.roundedRect(M, M, 11, 11, 2, 2, 'F');
-    doc.setTextColor(250, 204, 21); doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text('+', M + 5.5, M + 7.6, { align: 'center' });
+    pdfLogo(doc, logo, M, M);
+    doc.setFont('helvetica', 'bold');
     doc.setTextColor(...BRAND); doc.setFontSize(7.5); doc.text(`PAROKI ${P.nama.toUpperCase()}${P.kota ? ' · ' + P.kota.toUpperCase() : ''}`, M + 14, M + 3.6);
     doc.setTextColor(17, 24, 39); doc.setFontSize(15); doc.text('Layanan Hantaran', M + 14, M + 9.6);
     doc.setFontSize(13); doc.text(monthName(ym), PW - M, M + 6, { align: 'right' });
@@ -2865,16 +2888,14 @@ async function reportHantaran(ym) {
     // judul bagian selalu bersama kartu pertamanya
     if (top + 7 + cardH(groups[0]) > BOTTOM) { doc.addPage(); top = pageHead(); }
     secHead(false);
-    // susun kartu ke kolom yang paling pendek
-    let colY = Array(NCOL).fill(top);
-    for (const g of groups) {
-      const hh = cardH(g);
-      let c = colY.indexOf(Math.min(...colY));
-      if (colY[c] + hh > BOTTOM) { doc.addPage(); top = pageHead(); secHead(true); colY = Array(NCOL).fill(top); c = 0; }
-      drawCard(g, M + c * (CW + CG), colY[c], hh, label);
-      colY[c] += hh + CG;
+    // urut nomor grup dari kiri ke kanan, per baris; kartu satu baris dibuat sama tinggi
+    for (let i = 0; i < groups.length; i += NCOL) {
+      const row = groups.slice(i, i + NCOL), hh = Math.max(...row.map(cardH));
+      if (top + hh > BOTTOM) { doc.addPage(); top = pageHead(); secHead(true); }
+      row.forEach((g, c) => drawCard(g, M + c * (CW + CG), top, hh, label));
+      top += hh + CG;
     }
-    top = Math.max(...colY) + 1;
+    top += 1;
   }
   if (month?.notes) {
     doc.setFontSize(7.5); const lines = doc.splitTextToSize(month.notes, PW - 2 * M - 4);
