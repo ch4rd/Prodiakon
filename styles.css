@@ -434,21 +434,22 @@ a.link-btn { text-decoration: none; display: inline-block; }
   .phant .hsec.newpg { break-before: page; page-break-before: always; margin-top: 0; }
   .phant .hgrid { orphans: 1; widows: 1; } /* baris kartu boleh tinggal satu di akhir/awal halaman → tidak ada ruang kosong */
   /* urut kiri → kanan, 2 kartu per baris; inline-grid = satu blok utuh yang tidak bisa dipotong antar halaman (juga di Safari) */
-  .phant .hrow { display: inline-grid; width: 100%; vertical-align: top; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.5mm; margin-bottom: 2.5mm; break-inside: avoid; page-break-inside: avoid; }
-  .phant .hcard { break-inside: avoid; border: .3mm solid #d1d5db; border-radius: 2mm; margin-bottom: 0; overflow: hidden; font-size: 7.5pt; }
-  .phant .hh { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; padding: 1.4mm 2mm 1.2mm; background: #e0f2fe; border-top: 1.6mm solid #0ea5e9; }
-  .phant .hh b { font-size: 10pt; }
-  .phant .hh span { color: #374151; font-size: 7pt; }
-  .phant .hwk { display: grid; grid-template-columns: repeat(var(--n), 1fr); gap: 1mm; padding: 1.5mm 2mm; }
-  .phant .hwk div { background: #f3f4f6; border-radius: 1mm; text-align: center; padding: .6mm .3mm; overflow: hidden; }
+  .phant .hrow { display: inline-grid; width: 100%; vertical-align: top; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2mm; margin-bottom: 2mm; break-inside: avoid; page-break-inside: avoid; }
+  .phant .hbreak { break-after: page; page-break-after: always; height: 0; }
+  .phant .hcard { break-inside: avoid; border: .3mm solid #d1d5db; border-radius: 2mm; margin-bottom: 0; overflow: hidden; font-size: 7.4pt; line-height: 1.32; }
+  .phant .hh { display: flex; justify-content: space-between; align-items: baseline; gap: 1.5mm; padding: 1mm 1.6mm .8mm; background: #e0f2fe; border-top: 1.2mm solid #0ea5e9; }
+  .phant .hh b { font-size: 9.5pt; white-space: nowrap; }
+  .phant .hh span { color: #374151; font-size: 6pt; text-align: right; }
+  .phant .hwk { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6mm; padding: 1mm 1.6mm; }
+  .phant .hwk div { background: #f3f4f6; border-radius: .8mm; padding: .35mm 1mm; overflow: hidden; display: flex; align-items: baseline; gap: 1mm; }
   .phant .hwk div.e { background: #fff7ed; color: #b45309; }
-  .phant .hwk small { display: block; font-size: 5.8pt; color: #6b7280; white-space: nowrap; }
-  .phant .hwk b { display: block; font-size: 7pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .phant .hfix { padding: 1.5mm 2mm; color: #6b7280; }
+  .phant .hwk small { flex: none; font-size: 6pt; color: #6b7280; white-space: nowrap; }
+  .phant .hwk b { flex: 1; min-width: 0; font-size: 7.2pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phant .hfix { padding: 1mm 1.6mm; color: #6b7280; }
   .phant .hfix b { color: #111827; }
-  .phant .hum { padding: 1mm 2mm 1.2mm; border-top: .2mm solid #e5e7eb; color: #4b5563; }
+  .phant .hum { padding: .7mm 1.6mm .8mm; border-top: .2mm solid #e5e7eb; color: #4b5563; }
   .phant .hum b { color: #111827; }
-  .phant .hum i { font-style: normal; font-weight: 700; color: #1f7a44; font-size: 6.5pt; }
+  .phant .hum i { font-style: normal; font-weight: 700; color: #1f7a44; font-size: 6.4pt; }
   .phant .hum .tel { color: #111827; }
   .phant .hnote { background: #fef3c7; border-radius: 1.5mm; padding: 2mm 3mm; font-size: 8pt; white-space: pre-wrap; break-inside: avoid; }
 }

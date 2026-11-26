@@ -1752,7 +1752,11 @@ function printView(misaList = S.misa, subtitle = '', { wil = '' } = {}) {
           <div>${h(m.alamat || '-')}</div>${m.telp ? `<div class="tel">Telp/WA: ${h(m.telp)}</div>` : ''}</div>`).join('') || '<div class="hum"><i>Belum ada umat</i></div>';
         cards.push(`<div class="hcard"><div class="hh"><b>Grup ${h(g.no)}</b><span>${wn ? 'Wil. ' + h(wn) : ''}</span></div>${pet}${um}</div>`);
       }
-      for (let i = 0; i < cards.length; i += 2) sec += `<div class="hrow">${cards.slice(i, i + 2).join('')}</div>`;
+      // 3 kartu per baris, 9 grup per halaman (A4 tegak)
+      for (let i = 0; i < cards.length; i += 3) {
+        if (i && i % 9 === 0) sec += '<div class="hbreak"></div>';
+        sec += `<div class="hrow">${cards.slice(i, i + 3).join('')}</div>`;
+      }
       sec += '</div>';
     }
     p.innerHTML = `<section class="phant"><div class="phead">${logo}<div class="t"><div class="kk2">Paroki ${h(P.nama)}${P.kota ? ' · ' + h(P.kota) : ''}</div><h1>Layanan Hantaran</h1></div>
