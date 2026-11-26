@@ -441,10 +441,10 @@ a.link-btn { text-decoration: none; display: inline-block; }
   .phant .hh b { font-size: 9.5pt; white-space: nowrap; }
   .phant .hh span { color: #374151; font-size: 6pt; text-align: right; }
   .phant .hwk { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6mm; padding: 1mm 1.6mm; }
-  .phant .hwk div { background: #f3f4f6; border-radius: .8mm; padding: .35mm 1mm; overflow: hidden; display: flex; align-items: baseline; gap: 1mm; }
+  .phant .hwk div { background: #f3f4f6; border-radius: .8mm; padding: .4mm 1mm .5mm; overflow: hidden; text-align: center; }
   .phant .hwk div.e { background: #fff7ed; color: #b45309; }
-  .phant .hwk small { flex: none; font-size: 6pt; color: #6b7280; white-space: nowrap; }
-  .phant .hwk b { flex: 1; min-width: 0; font-size: 7.2pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .phant .hwk small { display: block; font-size: 6pt; color: #6b7280; white-space: nowrap; }
+  .phant .hwk b { display: block; font-size: 7.6pt; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .phant .hfix { padding: 1mm 1.6mm; color: #6b7280; }
   .phant .hfix b { color: #111827; }
   .phant .hum { padding: .7mm 1.6mm .8mm; border-top: .2mm solid #e5e7eb; color: #4b5563; }
