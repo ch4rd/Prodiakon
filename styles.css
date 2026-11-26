@@ -432,7 +432,9 @@ a.link-btn { text-decoration: none; display: inline-block; }
   .phant .hsec { background: #0ea5e9; color: #fff; font-weight: 800; font-size: 9pt; border-radius: 1.5mm; padding: 1mm 2.5mm; margin: 3mm 0 2mm; break-after: avoid; }
   .phant .hsec span { font-weight: 500; opacity: .9; margin-left: 2mm; }
   .phant .hsec.newpg { break-before: page; page-break-before: always; margin-top: 0; }
-  .phant .hrow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.5mm; margin-bottom: 2.5mm; break-inside: avoid; page-break-inside: avoid; } /* urut kiri → kanan, 2 kartu per baris */
+  .phant .hgrid { orphans: 1; widows: 1; } /* baris kartu boleh tinggal satu di akhir/awal halaman → tidak ada ruang kosong */
+  /* urut kiri → kanan, 2 kartu per baris; inline-grid = satu blok utuh yang tidak bisa dipotong antar halaman (juga di Safari) */
+  .phant .hrow { display: inline-grid; width: 100%; vertical-align: top; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2.5mm; margin-bottom: 2.5mm; break-inside: avoid; page-break-inside: avoid; }
   .phant .hcard { break-inside: avoid; border: .3mm solid #d1d5db; border-radius: 2mm; margin-bottom: 0; overflow: hidden; font-size: 7.5pt; }
   .phant .hh { display: flex; justify-content: space-between; align-items: baseline; gap: 2mm; padding: 1.4mm 2mm 1.2mm; background: #e0f2fe; border-top: 1.6mm solid #0ea5e9; }
   .phant .hh b { font-size: 10pt; }
