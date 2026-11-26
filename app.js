@@ -1740,16 +1740,19 @@ function printView(misaList = S.misa, subtitle = '', { wil = '' } = {}) {
         .sort((a, b) => String(a.no).localeCompare(String(b.no), 'id', { numeric: true }));
       if (!gs.length) continue;
       const fixed = !REGULAR.includes(s.key);
-      sec += `<div class="hsec">${h(s.label)} <span>${gs.length} grup · ${gs.reduce((t, g) => t + mem(g).length, 0)} umat</span></div><div class="hgrid">`;
+      // tiap jam layanan mulai di halaman baru; kartu disusun per baris (2 kartu) agar tidak terpotong antar halaman
+      sec += `<div class="hsec${sec ? ' newpg' : ''}">${h(s.label)} <span>${gs.length} grup · ${gs.reduce((t, g) => t + mem(g).length, 0)} umat</span></div><div class="hgrid">`;
+      const cards = [];
       for (const g of gs) {
-        const wil = groupWilayah(g).map(w => w.nama).join(', ');
+        const wn = groupWilayah(g).map(w => w.nama).join(', ');
         const pet = fixed
           ? `<div class="hfix">Petugas tetap: <b>${h(g.officers.find(Boolean) || '-')}</b></div>`
           : `<div class="hwk" style="--n:${W.length}">${W.map((w, j) => `<div class="${g.officers[j] ? '' : 'e'}"><small>${h(w)}</small><b>${h(g.officers[j] || 'kosong')}</b></div>`).join('')}</div>`;
         const um = mem(g).map(m => `<div class="hum"><b>${h(m.nama || '-')}</b>${m.lingkungan ? ` <i>${h(m.lingkungan)}</i>` : ''}
           <div>${h(m.alamat || '-')}</div>${m.telp ? `<div class="tel">Telp/WA: ${h(m.telp)}</div>` : ''}</div>`).join('') || '<div class="hum"><i>Belum ada umat</i></div>';
-        sec += `<div class="hcard"><div class="hh"><b>Grup ${h(g.no)}</b><span>${wil ? 'Wil. ' + h(wil) : ''}</span></div>${pet}${um}</div>`;
+        cards.push(`<div class="hcard"><div class="hh"><b>Grup ${h(g.no)}</b><span>${wn ? 'Wil. ' + h(wn) : ''}</span></div>${pet}${um}</div>`);
       }
+      for (let i = 0; i < cards.length; i += 2) sec += `<div class="hrow">${cards.slice(i, i + 2).join('')}</div>`;
       sec += '</div>';
     }
     p.innerHTML = `<section class="phant"><div class="phead">${logo}<div class="t"><div class="kk2">Paroki ${h(P.nama)}${P.kota ? ' · ' + h(P.kota) : ''}</div><h1>Layanan Hantaran</h1></div>
@@ -2885,8 +2888,8 @@ async function reportHantaran(ym) {
       doc.text(`${sl.label.toUpperCase()}${more ? ' (lanjutan)' : ''}  ·  ${groups.length} grup · ${groups.reduce((t, g) => t + mem(g).length, 0)} umat`, M + 2, top + 3.7);
       top += 7;
     };
-    // judul bagian selalu bersama kartu pertamanya
-    if (top + 7 + cardH(groups[0]) > BOTTOM) { doc.addPage(); top = pageHead(); }
+    // tiap jam layanan mulai di halaman baru (kecuali yang pertama)
+    if (top > M + 17) { doc.addPage(); top = pageHead(); }
     secHead(false);
     // urut nomor grup dari kiri ke kanan, per baris; kartu satu baris dibuat sama tinggi
     for (let i = 0; i < groups.length; i += NCOL) {
